@@ -8,10 +8,10 @@ email=enzo.ccc@gmail.com
 
 about=Creates parallel elevation profiles from DEM/DTM data for archaeological analysis. Features include: dual parallel profiles with adjustable offset, interactive Plotly graphs, multi-DEM comparison, export profiles as georeferenced vectors (polylines/polygons), CSV data export, PNG export with world files, automatic section labeling, and real-time profile visualization. Perfect for analyzing walls, structures, excavations, and terrain features.
 
-tracker=https://github.com/enzococca/dual-profile-viewer/issues
-repository=https://github.com/enzococca/dual-profile-viewer
+tracker=https://github.com/enzococca/dual_profile_viewer/issues
+repository=https://github.com/enzococca/dual_profile_viewer
 tags=archaeology,profile,dem,dtm,elevation,analysis,vector,export
-homepage=https://github.com/enzococca/dual-profile-viewer
+homepage=https://github.com/enzococca/dual_profile_viewer
 category=Raster
 icon=icon.png
 experimental=False

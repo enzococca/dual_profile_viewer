@@ -269,6 +269,13 @@ class ProfileViewerDialog(QtWidgets.QDialog):
         self.btn_export_data.setEnabled(False)
         toolbar.addWidget(self.btn_export_data)
         
+        toolbar.addWidget(QtWidgets.QWidget())  # Spacer
+        
+        self.btn_help = QtWidgets.QPushButton("❓ Help")
+        self.btn_help.clicked.connect(self.show_help)
+        self.btn_help.setToolTip("Open user manual")
+        toolbar.addWidget(self.btn_help)
+        
         layout.addLayout(toolbar)
         
         # Graph area
@@ -1038,3 +1045,50 @@ Section: {profile1['distances'][-1]:.2f}m, Points: {len(profile1['distances'])},
                     self, "Error",
                     f"Export error:\n{str(e)}"
                 )
+    
+    def show_help(self):
+        """Open the user manual"""
+        import os
+        import webbrowser
+        from pathlib import Path
+        
+        # Get the plugin directory
+        plugin_dir = os.path.dirname(__file__)
+        manual_path = os.path.join(plugin_dir, "USER_MANUAL.md")
+        
+        # Check if manual exists
+        if os.path.exists(manual_path):
+            # Try to open with system default markdown viewer
+            # On most systems, this will open in the default browser or markdown editor
+            try:
+                # Convert to file URL
+                file_url = Path(manual_path).as_uri()
+                webbrowser.open(file_url)
+            except Exception:
+                # If that fails, try to open directly
+                try:
+                    import subprocess
+                    if os.name == 'nt':  # Windows
+                        os.startfile(manual_path)
+                    elif os.name == 'posix':  # macOS and Linux
+                        subprocess.call(['open', manual_path])
+                except Exception as e:
+                    # Last resort: show path to user
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "User Manual",
+                        f"User manual is located at:\n\n{manual_path}\n\n"
+                        f"Please open it with your preferred markdown viewer."
+                    )
+        else:
+            # Manual not found, offer to open online version
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "User Manual",
+                "Local manual not found.\n\n"
+                "Would you like to open the online documentation?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            
+            if reply == QtWidgets.QMessageBox.Yes:
+                webbrowser.open("https://github.com/enzococca/dual-profile-viewer/wiki")

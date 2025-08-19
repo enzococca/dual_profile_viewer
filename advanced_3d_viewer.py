@@ -281,10 +281,19 @@ class Advanced3DViewer(QDialog):
             # Get from current QGIS project if not provided
             profile_data_list = self.get_profiles_from_project()
         
+        # Ensure profile_data_list is a list
+        if not isinstance(profile_data_list, list):
+            QgsMessageLog.logMessage("Invalid profile data received, expected list", 
+                                   "DualProfileViewer", Qgis.Warning)
+            profile_data_list = []
+        
         self.profiles = profile_data_list
         self.update_section_combo()
-        self.create_3d_sections()
-        self.plotter.reset_camera()
+        
+        # Only create 3D sections if we have profiles
+        if self.profiles:
+            self.create_3d_sections()
+            self.plotter.reset_camera()
     
     def create_3d_sections(self):
         """Create 3D mesh sections from profile data"""
@@ -628,7 +637,7 @@ class Advanced3DViewer(QDialog):
     def get_profiles_from_project(self):
         """Get profile data from current QGIS project"""
         # This would interface with the main plugin to get current profile data
-        # Placeholder for now
+        # Placeholder for now - returns empty list
         return []
     
     def export_to_attribute_table(self):

@@ -101,7 +101,7 @@ class DualProfileViewer:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
-        
+        icon_path2 = os.path.join(self.plugin_dir, 'image.png')
         self.add_action(
             icon_path,
             text=self.tr('Dual Profile Viewer'),
@@ -112,7 +112,7 @@ class DualProfileViewer:
         
         # Add 3D viewer action
         self.add_action(
-            icon_path,
+            icon_path2,
             text=self.tr('Advanced 3D Profile Viewer'),
             callback=self.run_3d_viewer,
             parent=self.iface.mainWindow(),

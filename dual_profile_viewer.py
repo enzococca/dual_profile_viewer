@@ -21,6 +21,8 @@ import os.path
 
 # Import the main dialog
 from .dual_profile_tool import ProfileViewerDialog
+from .stratigraph_3d_dialog import Stratigraph3DDialog
+from .stratigraph_integration import StratigraphIntegration
 
 class DualProfileViewer:
     """Main plugin implementation."""
@@ -52,6 +54,8 @@ class DualProfileViewer:
         self.menu = '&Dual Profile Viewer'
         self.toolbar = None
         self.dialog = None
+        self.stratigraph_dialog = None
+        self.stratigraph_integration = StratigraphIntegration()
 
     def tr(self, message):
         """Get the translation for a string using Qt translation API."""
@@ -97,6 +101,7 @@ class DualProfileViewer:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
+        icon_path2 = os.path.join(self.plugin_dir, 'stratigraph_logo.png')
         
         self.add_action(
             icon_path,
@@ -105,6 +110,15 @@ class DualProfileViewer:
             parent=self.iface.mainWindow(),
             status_tip=self.tr('Create dual elevation profiles from DEM/DTM'),
             whats_this=self.tr('Archaeological dual profile analysis tool'))
+        
+        # Add 3D visualization action
+        self.add_action(
+            icon_path2,
+            text=self.tr('3D Stratigraphic Visualization'),
+            callback=self.run_3d_visualization,
+            parent=self.iface.mainWindow(),
+            status_tip=self.tr('Create 3D stratigraphic visualizations'),
+            whats_this=self.tr('3D visualization using stratigraph library'))
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -127,3 +141,47 @@ class DualProfileViewer:
         self.dialog.show()
         # Run the dialog event loop
         result = self.dialog.exec_()
+    
+    def run_3d_visualization(self):
+        """Open the 3D stratigraphic visualization dialog"""
+        if not self.stratigraph_dialog:
+            self.stratigraph_dialog = Stratigraph3DDialog(parent=self.iface.mainWindow())
+            self.stratigraph_dialog.visualization_requested.connect(self.create_3d_visualization)
+        
+        self.stratigraph_dialog.show()
+        self.stratigraph_dialog.exec_()
+    
+    def create_3d_visualization(self, settings):
+        """Create 3D visualization with the given settings"""
+        from qgis.core import QgsMessageLog, Qgis
+        
+        QgsMessageLog.logMessage("Starting 3D visualization", "DualProfileViewer", Qgis.Info)
+        
+        # Check if we have profile data from the main dialog
+        if self.dialog and hasattr(self.dialog, 'get_profile_data'):
+            profile_data = self.dialog.get_profile_data()
+            QgsMessageLog.logMessage(f"Got profile data: {type(profile_data)}, length: {len(profile_data) if profile_data else 0}", "DualProfileViewer", Qgis.Info)
+            
+            # Check if we have multiple profiles for cross-sections
+            profile_data_list = []
+            if hasattr(self.dialog, 'get_all_profile_data'):
+                profile_data_list = self.dialog.get_all_profile_data()
+            elif profile_data:
+                profile_data_list = [profile_data]
+                
+            if profile_data_list:
+                # Load the first profile for basic operations
+                self.stratigraph_integration.load_profile_data(profile_data_list[0])
+                self.stratigraph_integration.create_stratigraphic_model(
+                    layer_boundaries=None  # Auto-generate based on settings
+                )
+                # Pass all profiles for cross-section visualization
+                self.stratigraph_integration.visualize_3d(
+                    show_layers=settings['show_layers'],
+                    exploded=settings['exploded_view'],
+                    settings=settings,
+                    profile_data_list=profile_data_list
+                )
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(None, "No Data", "Please create profiles first before 3D visualization")

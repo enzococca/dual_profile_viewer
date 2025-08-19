@@ -1092,3 +1092,49 @@ Section: {profile1['distances'][-1]:.2f}m, Points: {len(profile1['distances'])},
             
             if reply == QtWidgets.QMessageBox.Yes:
                 webbrowser.open("https://github.com/enzococca/dual-profile-viewer/wiki")
+    
+    def get_profile_data(self):
+        """Get profile data for 3D visualization"""
+        if not self.profile_data:
+            return None
+            
+        # Return combined profile data suitable for stratigraph
+        profile_points = []
+        
+        # Use profile 1 as the main profile
+        p1 = self.profile_data['profile1']
+        for i in range(len(p1['distances'])):
+            if not np.isnan(p1['elevations'][i]):
+                profile_points.append((
+                    p1['distances'][i],
+                    p1['elevations'][i],
+                    0  # Z coordinate for 2D profile
+                ))
+                
+        return profile_points
+        
+    def get_all_profile_data(self):
+        """Get all profile data for cross-section visualization"""
+        if not self.profile_data:
+            return []
+            
+        all_profiles = []
+        
+        # Get both profiles
+        for profile_key in ['profile1', 'profile2']:
+            if profile_key in self.profile_data:
+                profile = self.profile_data[profile_key]
+                profile_points = []
+                
+                for i in range(len(profile['distances'])):
+                    if not np.isnan(profile['elevations'][i]):
+                        profile_points.append((
+                            profile['distances'][i],
+                            profile['elevations'][i],
+                            0
+                        ))
+                        
+                if profile_points:
+                    all_profiles.append(profile_points)
+                    
+        return all_profiles

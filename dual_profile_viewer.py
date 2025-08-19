@@ -21,8 +21,8 @@ import os.path
 
 # Import the main dialog
 from .dual_profile_tool import ProfileViewerDialog
-from .stratigraph_3d_dialog import Stratigraph3DDialog
-from .stratigraph_integration import StratigraphIntegration
+from .advanced_3d_viewer import Advanced3DViewer
+
 
 class DualProfileViewer:
     """Main plugin implementation."""
@@ -54,8 +54,8 @@ class DualProfileViewer:
         self.menu = '&Dual Profile Viewer'
         self.toolbar = None
         self.dialog = None
-        self.stratigraph_dialog = None
-        self.stratigraph_integration = StratigraphIntegration()
+        self.viewer_3d = None
+
 
     def tr(self, message):
         """Get the translation for a string using Qt translation API."""
@@ -101,7 +101,6 @@ class DualProfileViewer:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
-        icon_path2 = os.path.join(self.plugin_dir, 'stratigraph_logo.png')
         
         self.add_action(
             icon_path,
@@ -111,14 +110,14 @@ class DualProfileViewer:
             status_tip=self.tr('Create dual elevation profiles from DEM/DTM'),
             whats_this=self.tr('Archaeological dual profile analysis tool'))
         
-        # Add 3D visualization action
+        # Add 3D viewer action
         self.add_action(
-            icon_path2,
-            text=self.tr('3D Stratigraphic Visualization'),
-            callback=self.run_3d_visualization,
+            icon_path,
+            text=self.tr('Advanced 3D Profile Viewer'),
+            callback=self.run_3d_viewer,
             parent=self.iface.mainWindow(),
-            status_tip=self.tr('Create 3D stratigraphic visualizations'),
-            whats_this=self.tr('3D visualization using stratigraph library'))
+            status_tip=self.tr('Advanced 3D visualization of profiles'),
+            whats_this=self.tr('View profiles in 3D with advanced features'))
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -142,46 +141,29 @@ class DualProfileViewer:
         # Run the dialog event loop
         result = self.dialog.exec_()
     
-    def run_3d_visualization(self):
-        """Open the 3D stratigraphic visualization dialog"""
-        if not self.stratigraph_dialog:
-            self.stratigraph_dialog = Stratigraph3DDialog(parent=self.iface.mainWindow())
-            self.stratigraph_dialog.visualization_requested.connect(self.create_3d_visualization)
+    def run_3d_viewer(self):
+        """Open the advanced 3D viewer"""
+        if not self.viewer_3d:
+            self.viewer_3d = Advanced3DViewer(parent=self.iface.mainWindow())
         
-        self.stratigraph_dialog.show()
-        self.stratigraph_dialog.exec_()
-    
-    def create_3d_visualization(self, settings):
-        """Create 3D visualization with the given settings"""
-        from qgis.core import QgsMessageLog, Qgis
-        
-        QgsMessageLog.logMessage("Starting 3D visualization", "DualProfileViewer", Qgis.Info)
-        
-        # Check if we have profile data from the main dialog
+        # Get profile data from main dialog if available
         if self.dialog and hasattr(self.dialog, 'get_profile_data'):
-            profile_data = self.dialog.get_profile_data()
-            QgsMessageLog.logMessage(f"Got profile data: {type(profile_data)}, length: {len(profile_data) if profile_data else 0}", "DualProfileViewer", Qgis.Info)
-            
-            # Check if we have multiple profiles for cross-sections
             profile_data_list = []
-            if hasattr(self.dialog, 'get_all_profile_data'):
-                profile_data_list = self.dialog.get_all_profile_data()
-            elif profile_data:
-                profile_data_list = [profile_data]
-                
+            
+            # Try to get multiple profiles
+            if hasattr(self.dialog, 'profile_data_list'):
+                profile_data_list = self.dialog.profile_data_list
+            elif hasattr(self.dialog, 'profile_data'):
+                # Get both profiles if available
+                if hasattr(self.dialog, 'profile_data2'):
+                    profile_data_list = [self.dialog.profile_data, self.dialog.profile_data2]
+                else:
+                    profile_data_list = [self.dialog.profile_data]
+            
+            # Load profiles into 3D viewer
             if profile_data_list:
-                # Load the first profile for basic operations
-                self.stratigraph_integration.load_profile_data(profile_data_list[0])
-                self.stratigraph_integration.create_stratigraphic_model(
-                    layer_boundaries=None  # Auto-generate based on settings
-                )
-                # Pass all profiles for cross-section visualization
-                self.stratigraph_integration.visualize_3d(
-                    show_layers=settings['show_layers'],
-                    exploded=settings['exploded_view'],
-                    settings=settings,
-                    profile_data_list=profile_data_list
-                )
-            else:
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.warning(None, "No Data", "Please create profiles first before 3D visualization")
+                self.viewer_3d.load_profiles(profile_data_list)
+        
+        self.viewer_3d.show()
+        self.viewer_3d.exec_()
+

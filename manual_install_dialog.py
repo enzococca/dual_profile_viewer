@@ -134,8 +134,7 @@ class ManualInstallDialog(QDialog):
         notes = """
         <h3>Important Notes:</h3>
         <ul>
-        <li><b>Mayavi</b> requires additional system dependencies (VTK) and may be difficult to install</li>
-        <li><b>stratigraph</b> is optional and can be skipped if installation fails</li>
+
         <li>Core features work with just matplotlib, numpy, and scipy</li>
         </ul>
         

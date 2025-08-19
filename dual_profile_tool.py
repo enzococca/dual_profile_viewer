@@ -309,6 +309,7 @@ class ProfileViewerDialog(QtWidgets.QDialog):
         
         # Variables
         self.profile_data = None
+        self.profile_data_list = []  # For 3D viewer
         self.map_tool = None
         self.section_count = 0
         self.current_figure = None
@@ -1092,6 +1093,59 @@ Section: {profile1['distances'][-1]:.2f}m, Points: {len(profile1['distances'])},
             
             if reply == QtWidgets.QMessageBox.Yes:
                 webbrowser.open("https://github.com/enzococca/dual-profile-viewer/wiki")
+    
+    def open_3d_viewer(self):
+        """Open the 3D viewer with current profile data"""
+        if not self.profile_data:
+            QtWidgets.QMessageBox.warning(self, "No Data", 
+                                         "Please create profiles first before opening 3D viewer")
+            return
+        
+        # Import the 3D viewer
+        from .advanced_3d_viewer import Advanced3DViewer
+        
+        # Create viewer if not exists
+        if not hasattr(self, 'viewer_3d') or self.viewer_3d is None:
+            self.viewer_3d = Advanced3DViewer(self)
+        
+        # Prepare profile data list with proper format
+        self.prepare_profile_data_for_3d()
+        
+        # Load profiles into viewer
+        if self.profile_data_list:
+            self.viewer_3d.load_profiles(self.profile_data_list)
+        
+        # Show the viewer
+        self.viewer_3d.show()
+    
+    def prepare_profile_data_for_3d(self):
+        """Prepare profile data in format needed for 3D viewer"""
+        self.profile_data_list = []
+        
+        if not self.profile_data:
+            return
+        
+        # Prepare profile 1
+        if 'profile1' in self.profile_data:
+            p1 = self.profile_data['profile1']
+            profile1_data = {
+                'name': 'Profile A (Red)',
+                'distances': p1['distances'],
+                'elevations': p1['elevations'],
+                'coordinates': list(zip(p1['x_coords'], p1['y_coords'])) if 'x_coords' in p1 else None
+            }
+            self.profile_data_list.append(profile1_data)
+        
+        # Prepare profile 2
+        if 'profile2' in self.profile_data:
+            p2 = self.profile_data['profile2']
+            profile2_data = {
+                'name': 'Profile B (Blue)',
+                'distances': p2['distances'],
+                'elevations': p2['elevations'],
+                'coordinates': list(zip(p2['x_coords'], p2['y_coords'])) if 'x_coords' in p2 else None
+            }
+            self.profile_data_list.append(profile2_data)
     
     def get_profile_data(self):
         """Get profile data for 3D visualization"""

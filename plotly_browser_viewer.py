@@ -139,7 +139,19 @@ def create_plotly_3d_visualization(profile_data_list, settings):
     
     # Save to temporary HTML file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
-        f.write(pyo.plot(fig, output_type='html', include_plotlyjs='cdn'))
+        # Generate complete HTML
+        html_string = pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
+        full_html = f"""
+        <html>
+        <head>
+            <title>3D Cross-Section Visualization</title>
+        </head>
+        <body>
+            {html_string}
+        </body>
+        </html>
+        """
+        f.write(full_html)
         temp_path = f.name
         
     # Open in browser

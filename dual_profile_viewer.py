@@ -19,8 +19,8 @@ from qgis.PyQt.QtWidgets import QAction, QToolBar
 from qgis.core import QgsProject
 import os.path
 
-# Import the main dialog
-from .dual_profile_tool import ProfileViewerDialog
+# Import the docked viewer and 3D viewer
+from .dual_profile_dock import DualProfileDock
 from .advanced_3d_viewer import Advanced3DViewer
 
 
@@ -54,6 +54,7 @@ class DualProfileViewer:
         self.menu = '&Dual Profile Viewer'
         self.toolbar = None
         self.dialog = None
+        self.dock_widget = None
         self.viewer_3d = None
 
 
@@ -102,6 +103,8 @@ class DualProfileViewer:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
         icon_path2 = os.path.join(self.plugin_dir, 'image.png')
+        
+        # Add main viewer action
         self.add_action(
             icon_path,
             text=self.tr('Dual Profile Viewer'),
@@ -132,14 +135,15 @@ class DualProfileViewer:
 
     def run(self):
         """Run method that performs all the real work"""
-        # Create dialog if it doesn't exist
-        if not self.dialog:
-            self.dialog = ProfileViewerDialog(self.iface, parent=self.iface.mainWindow())
+        # Create dock widget if it doesn't exist
+        if not self.dock_widget:
+            self.dock_widget = DualProfileDock(self.iface, parent=self.iface.mainWindow())
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock_widget)
+            self.dialog = self.dock_widget.get_profile_viewer()
         
-        # Show the dialog
-        self.dialog.show()
-        # Run the dialog event loop
-        result = self.dialog.exec_()
+        # Show the dock widget
+        self.dock_widget.show()
+        self.dock_widget.raise_()
     
     def run_3d_viewer(self):
         """Open the advanced 3D viewer"""
@@ -147,23 +151,22 @@ class DualProfileViewer:
             self.viewer_3d = Advanced3DViewer(parent=self.iface.mainWindow())
         
         # Get profile data from main dialog if available
-        if self.dialog and hasattr(self.dialog, 'get_profile_data'):
-            profile_data_list = []
+        if self.dialog and hasattr(self.dialog, 'profile_data_list') and self.dialog.profile_data_list:
+            # Pass the profile data list directly
+            self.viewer_3d.load_profiles(self.dialog.profile_data_list)
+        elif self.dialog and hasattr(self.dialog, 'profile_data') and self.dialog.profile_data:
+            # Convert single profile data to list format expected by 3D viewer
+            profile_list = []
+            profile_data = self.dialog.profile_data
             
-            # Try to get multiple profiles
-            if hasattr(self.dialog, 'profile_data_list'):
-                profile_data_list = self.dialog.profile_data_list
-            elif hasattr(self.dialog, 'profile_data'):
-                # Get both profiles if available
-                if hasattr(self.dialog, 'profile_data2'):
-                    profile_data_list = [self.dialog.profile_data, self.dialog.profile_data2]
-                else:
-                    profile_data_list = [self.dialog.profile_data]
-            
-            # Load profiles into 3D viewer
-            if profile_data_list:
-                self.viewer_3d.load_profiles(profile_data_list)
+            # Check if we have the correct structure
+            if 'profile1' in profile_data:
+                profile_list.append(profile_data['profile1'])
+            if 'profile2' in profile_data:
+                profile_list.append(profile_data['profile2'])
+                
+            if profile_list:
+                self.viewer_3d.load_profiles(profile_list)
         
         self.viewer_3d.show()
         self.viewer_3d.exec_()
-

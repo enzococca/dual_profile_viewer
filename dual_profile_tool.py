@@ -42,6 +42,7 @@ import webbrowser
 # Import profile exporter
 from .profile_exporter import ProfileExporter
 from .vector_export_dialog import VectorExportDialog
+from .multi_dem_widget import MultiDEMWidget
 
 # Try to import plotly
 try:
@@ -92,17 +93,27 @@ class DualProfileTool(QgsMapTool):
                 
                 # Create rubber bands
                 self.rubber_band_center = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-                self.rubber_band_center.setColor(QColor(128, 128, 128, 30))
-                self.rubber_band_center.setWidth(0.5)
+                self.rubber_band_center.setColor(QColor(128, 128, 128, 100))  # Increased opacity
+                self.rubber_band_center.setWidth(1)  # Increased width
                 self.rubber_band_center.setLineStyle(Qt.DashLine)
                 
                 self.rubber_band1 = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-                self.rubber_band1.setColor(QColor(255, 0, 0, 200))
-                self.rubber_band1.setWidth(2)
+                self.rubber_band1.setColor(QColor(255, 0, 0, 255))  # Full opacity
+                self.rubber_band1.setWidth(3)  # Increased width
                 
                 self.rubber_band2 = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-                self.rubber_band2.setColor(QColor(0, 0, 255, 200))
-                self.rubber_band2.setWidth(2)
+                self.rubber_band2.setColor(QColor(0, 0, 255, 255))  # Full opacity
+                self.rubber_band2.setWidth(3)  # Increased width
+                
+                # Add initial point to make them visible
+                self.rubber_band_center.addPoint(self.start_point)
+                self.rubber_band1.addPoint(self.start_point)
+                self.rubber_band2.addPoint(self.start_point)
+                
+                # Ensure they are on top
+                self.rubber_band_center.updatePosition()
+                self.rubber_band1.updatePosition()
+                self.rubber_band2.updatePosition()
             else:
                 # Second click: complete drawing
                 self.end_point = point
@@ -123,16 +134,22 @@ class DualProfileTool(QgsMapTool):
                 self.rubber_band_center.reset(QgsWkbTypes.LineGeometry)
                 self.rubber_band_center.addPoint(self.start_point)
                 self.rubber_band_center.addPoint(current_point)
+                self.rubber_band_center.show()  # Ensure visibility
             
             if self.rubber_band1:
                 self.rubber_band1.reset(QgsWkbTypes.LineGeometry)
                 for point in line1:
                     self.rubber_band1.addPoint(point)
+                self.rubber_band1.show()  # Ensure visibility
                     
             if self.rubber_band2:
                 self.rubber_band2.reset(QgsWkbTypes.LineGeometry)
                 for point in line2:
                     self.rubber_band2.addPoint(point)
+                self.rubber_band2.show()  # Ensure visibility
+            
+            # Force canvas refresh
+            self.canvas.refresh()
                     
     def calculate_parallel_lines(self, start, end, offset):
         """Calculate two parallel lines equidistant from the center line"""
@@ -218,15 +235,16 @@ class ProfileViewerDialog(QtWidgets.QDialog):
         self.load_raster_layers(self.combo_dem)
         toolbar.addWidget(self.combo_dem)
         
-        # Secondary DEM
-        self.check_multi_dem = QtWidgets.QCheckBox("Compare DEMs")
+        # Multi-DEM comparison
+        self.check_multi_dem = QtWidgets.QCheckBox("Compare Multiple DEMs")
         self.check_multi_dem.toggled.connect(self.on_multi_dem_toggled)
         toolbar.addWidget(self.check_multi_dem)
         
-        self.combo_dem2 = QtWidgets.QComboBox()
-        self.combo_dem2.setVisible(False)
-        self.load_raster_layers(self.combo_dem2)
-        toolbar.addWidget(self.combo_dem2)
+        # Add multi-DEM widget (initially hidden)
+        self.multi_dem_widget = MultiDEMWidget()
+        self.multi_dem_widget.setVisible(False)
+        self.multi_dem_widget.selection_changed.connect(self.on_dem_selection_changed)
+        layout.addWidget(self.multi_dem_widget)
         
         # Offset distance
         toolbar.addWidget(QtWidgets.QLabel("Offset:"))
@@ -329,10 +347,15 @@ class ProfileViewerDialog(QtWidgets.QDialog):
             combo.addItem("(No DEM/DTM found)", None)
             
     def on_multi_dem_toggled(self, checked):
-        """Toggle visibility of second DEM selector"""
-        self.combo_dem2.setVisible(checked)
+        """Toggle visibility of multi-DEM selector"""
+        self.multi_dem_widget.setVisible(checked)
         if checked:
-            self.load_raster_layers(self.combo_dem2)
+            self.multi_dem_widget.refresh_dem_list()
+            
+    def on_dem_selection_changed(self, selected_layers):
+        """Handle changes in DEM selection"""
+        # Store selected DEMs for comparison
+        self.selected_dem_layers = selected_layers
             
     def start_drawing(self):
         """Activate drawing tool"""
@@ -394,20 +417,20 @@ class ProfileViewerDialog(QtWidgets.QDialog):
         valid_count1 = np.sum(~np.isnan(profile1['elevations']))
         print(f"DEM1 ({dem_layer.name()}): {valid_count1}/{num_samples} valid points")
         
-        # Check for second DEM
-        profile1_dem2 = None
-        profile2_dem2 = None
-        dem2_name = None
+        # Check for multiple DEMs
+        additional_profiles = {}
         
-        if self.check_multi_dem.isChecked():
-            dem2_layer_id = self.combo_dem2.currentData()
-            if dem2_layer_id:
-                dem2_layer = QgsProject.instance().mapLayer(dem2_layer_id)
-                if dem2_layer:
-                    dem2_name = dem2_layer.name()
+        if self.check_multi_dem.isChecked() and hasattr(self, 'selected_dem_layers'):
+            for i, layer_id in enumerate(self.selected_dem_layers):
+                if layer_id == dem_layer.id():
+                    continue  # Skip primary DEM
+                    
+                dem_layer_comp = QgsProject.instance().mapLayer(layer_id)
+                if dem_layer_comp:
+                    dem_name = dem_layer_comp.name()
                     
                     # Check if DEMs have same CRS
-                    if dem_layer.crs() != dem2_layer.crs():
+                    if dem_layer.crs() != dem_layer_comp.crs():
                         QtWidgets.QMessageBox.warning(
                             self,
                             "CRS Mismatch",

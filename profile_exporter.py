@@ -15,6 +15,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtGui import QColor
+from qgis.utils import iface
 import numpy as np
 import math
 
@@ -144,10 +145,18 @@ class ProfileExporter:
         
         # Add to map if requested
         if add_to_map:
-            # Clone the layer for adding to map
-            map_layer = layer.clone()
-            map_layer.setName(layer_name)
-            QgsProject.instance().addMapLayer(map_layer)
+            # Load the saved file as a new layer
+            map_layer = QgsVectorLayer(output_path, layer_name, "ogr")
+            if map_layer.isValid():
+                QgsProject.instance().addMapLayer(map_layer)
+                # Zoom to layer extent
+                iface.mapCanvas().setExtent(map_layer.extent())
+                iface.mapCanvas().refresh()
+            else:
+                # Fallback to clone method
+                map_layer = layer.clone()
+                map_layer.setName(layer_name)
+                QgsProject.instance().addMapLayer(map_layer)
         
         return layer
     

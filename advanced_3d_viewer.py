@@ -406,7 +406,8 @@ class Advanced3DViewer(QDialog):
             # Use VTK intersection filter
             intersection = mesh1.intersection(mesh2)
             
-            if intersection.n_points > 0:
+            # Check if intersection has points
+            if intersection is not None and len(intersection.points) > 0:
                 # Add intersection line to plotter
                 self.plotter.add_mesh(intersection, 
                                     color=self.section_colors['intersection'],
@@ -417,7 +418,8 @@ class Advanced3DViewer(QDialog):
                 self.intersection_points = intersection.points
                 
                 # Update info
-                self.intersect_info.setText(f"Found {intersection.n_points} intersection points")
+                n_points = len(intersection.points)
+                self.intersect_info.setText(f"Found {n_points} intersection points")
                 
                 # Add markers at intersection points
                 for point in intersection.points[:10]:  # Limit to first 10 points

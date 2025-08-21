@@ -6,6 +6,7 @@ Generates analysis reports using AI services
 
 import json
 import requests
+import numpy as np
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
@@ -22,6 +23,7 @@ class AIReportGenerator(QDialog):
         self.profile_data = profile_data
         self.setWindowTitle("AI Report Generator")
         self.resize(800, 600)
+        self.generated_report = None  # Store generated report
         
         self.setup_ui()
         
@@ -150,15 +152,76 @@ class AIReportGenerator(QDialog):
             self.report_text.setHtml(report)
             self.export_btn.setEnabled(True)
             
+            # Store plain text version for layout
+            self.generated_report = self.report_text.toPlainText()
+            
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to generate report: {str(e)}")
             
     def prepare_prompt(self):
         """Prepare prompt for AI"""
-        if self.profile_data.get('multi_section'):
+        if self.profile_data.get('all_sections'):
+            return self.prepare_all_sections_prompt()
+        elif self.profile_data.get('multi_section'):
             return self.prepare_multi_section_prompt()
         else:
             return self.prepare_standard_prompt()
+            
+    def prepare_all_sections_prompt(self):
+        """Prepare prompt for all sections analysis"""
+        all_sections = self.profile_data.get('all_sections', [])
+        
+        prompt = f"""Analyze the following geological profile data from {len(all_sections)} separate survey sections:
+
+**Total Sections Analyzed**: {len(all_sections)}
+**Primary DEM Source**: {self.profile_data.get('dem1_name', 'Unknown')}
+
+**Individual Section Data**:
+"""
+        
+        # Add data for each section
+        for idx, section_data in enumerate(all_sections):
+            profile_data = section_data['profile_data']
+            section_num = section_data.get('section_number', idx + 1)
+            
+            prompt += f"\n**Section {section_num}:**"
+            prompt += f"\n  - DEM: {profile_data.get('dem1_name', 'Unknown')}"
+            prompt += f"\n  - Type: {'Single Profile' if profile_data.get('single_mode') else 'Dual Profile'}"
+            
+            # Add statistics for profile A
+            if 'profile1' in profile_data:
+                profile1 = profile_data['profile1']
+                elev1 = profile1['elevations']
+                valid_elev1 = elev1[~np.isnan(elev1)]
+                if len(valid_elev1) > 0:
+                    prompt += f"\n  - Profile A-A': Length {profile1['distances'][-1]:.1f}m, "
+                    prompt += f"Elev {np.min(valid_elev1):.1f}-{np.max(valid_elev1):.1f}m "
+                    prompt += f"(mean {np.mean(valid_elev1):.1f}m)"
+            
+            # Add statistics for profile B if dual mode
+            if not profile_data.get('single_mode') and 'profile2' in profile_data and profile_data['profile2'] is not None:
+                profile2 = profile_data['profile2']
+                elev2 = profile2['elevations']
+                valid_elev2 = elev2[~np.isnan(elev2)]
+                if len(valid_elev2) > 0:
+                    prompt += f"\n  - Profile B-B': Length {profile2['distances'][-1]:.1f}m, "
+                    prompt += f"Elev {np.min(valid_elev2):.1f}-{np.max(valid_elev2):.1f}m "
+                    prompt += f"(mean {np.mean(valid_elev2):.1f}m)"
+        
+        prompt += "\n\nPlease provide:"
+        
+        if self.include_stats_cb.isChecked():
+            prompt += "\n1. Comparative statistical analysis across all sections"
+        
+        if self.include_interpretation_cb.isChecked():
+            prompt += "\n2. Geological/archaeological interpretation of the terrain patterns"
+        
+        if self.include_recommendations_cb.isChecked():
+            prompt += "\n3. Recommendations for further investigation"
+        
+        prompt += f"\n\nTechnical level: {self.technical_level_combo.currentText()}"
+        
+        return prompt
             
     def prepare_multi_section_prompt(self):
         """Prepare prompt for multi-section analysis"""
@@ -328,3 +391,7 @@ class AIReportGenerator(QDialog):
                 QtWidgets.QMessageBox.information(self, "Success", f"Report exported to {filename}")
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Error", f"Failed to export report: {str(e)}")
+    
+    def get_report_text(self):
+        """Get the generated report text"""
+        return self.generated_report

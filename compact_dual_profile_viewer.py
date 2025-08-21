@@ -1423,6 +1423,10 @@ DEM Difference (Primary - Comparison):
         
         if layers:
             section_layer = layers[0]
+            # Clear existing features if switching modes
+            section_layer.dataProvider().truncate()
+            # Force refresh of renderer when reusing layer
+            section_layer.setRenderer(None)
         else:
             # Create new layer
             crs = QgsProject.instance().crs()
@@ -1445,33 +1449,39 @@ DEM Difference (Primary - Comparison):
                 feature1.setGeometry(line1)
             else:
                 feature1.setGeometry(QgsGeometry.fromPolylineXY(line1))
+            single_mode = self.profile_data.get('single_mode', False)
             feature1.setAttributes([
                 self.section_count * 2 - 1,
-                f"A{self.section_count}-A'{self.section_count}",
-                "Upper",
+                f"A{self.section_count}-A'{self.section_count}" if not single_mode else f"Section {self.section_count}",
+                "Single" if single_mode else "Upper",
                 self.section_count,  # section_group
                 self.profile_data.get('dem1_name', 'DEM'),  # dem_name
                 ""  # notes
             ])
             section_layer.addFeature(feature1)
         
-        # Add line B-B'
-        feature2 = QgsFeature()
-        feature2.setGeometry(QgsGeometry.fromPolylineXY(self.profile_data['line2']))
-        feature2.setAttributes([
-            self.section_count * 2,
-            f"B{self.section_count}-B'{self.section_count}",
-            "Lower",
-            self.section_count,  # section_group
-            self.profile_data.get('dem1_name', 'DEM'),  # dem_name
-            ""  # notes
-        ])
-        section_layer.addFeature(feature2)
+        # Add line B-B' only if not in single mode
+        single_mode = self.profile_data.get('single_mode', False)
+        if not single_mode and 'line2' in self.profile_data and self.profile_data['line2'] is not None:
+            feature2 = QgsFeature()
+            feature2.setGeometry(QgsGeometry.fromPolylineXY(self.profile_data['line2']))
+            feature2.setAttributes([
+                self.section_count * 2,
+                f"B{self.section_count}-B'{self.section_count}",
+                "Lower",
+                self.section_count,  # section_group
+                self.profile_data.get('dem1_name', 'DEM'),  # dem_name
+                ""  # notes
+            ])
+            section_layer.addFeature(feature2)
         
         section_layer.commitChanges()
         
-        # Apply symbology
-        self.setup_layer_symbology(section_layer)
+        # Apply symbology based on mode
+        if single_mode:
+            self.setup_single_symbology(section_layer)
+        else:
+            self.setup_layer_symbology(section_layer)
         
         self.iface.mapCanvas().refresh()
         
@@ -1563,8 +1573,11 @@ DEM Difference (Primary - Comparison):
         
         layer.commitChanges()
         
-        # Apply symbology
-        self.setup_layer_symbology(layer)
+        # Apply symbology based on mode
+        if self.profile_data.get('single_mode', False):
+            self.setup_single_symbology(layer)
+        else:
+            self.setup_layer_symbology(layer)
         
         # Add to project
         QgsProject.instance().addMapLayer(layer)
@@ -1584,6 +1597,40 @@ DEM Difference (Primary - Comparison):
             parent = layer_node.parent()
             parent.removeChildNode(layer_node)
         
+    def setup_single_symbology(self, layer):
+        """Setup simple symbology for single section layer"""
+        # Create simple symbol
+        symbol = QgsSymbol.defaultSymbol(layer.geometryType())
+        symbol.setColor(QColor(255, 0, 0, 180))  # Red with alpha=180 (70% opacity)
+        symbol.setWidth(2.0)
+        
+        # Create single symbol renderer
+        renderer = QgsSingleSymbolRenderer(symbol)
+        layer.setRenderer(renderer)
+        
+        # Setup labeling
+        settings = QgsPalLayerSettings()
+        settings.fieldName = "label"
+        settings.placement = QgsPalLayerSettings.Line
+        
+        text_format = QgsTextFormat()
+        text_format.setSize(10)
+        text_format.setColor(QColor(0, 0, 0))
+        
+        buffer_settings = QgsTextBufferSettings()
+        buffer_settings.setEnabled(True)
+        buffer_settings.setSize(1)
+        buffer_settings.setColor(QColor(255, 255, 255))
+        text_format.setBuffer(buffer_settings)
+        
+        settings.setFormat(text_format)
+        
+        labeling = QgsVectorLayerSimpleLabeling(settings)
+        layer.setLabeling(labeling)
+        layer.setLabelsEnabled(True)
+        
+        layer.triggerRepaint()
+    
     def setup_layer_symbology(self, layer):
         """Setup symbology for section layer"""
         # Create categorized renderer
@@ -2002,19 +2049,40 @@ DEM Difference (Primary - Comparison):
         # Use current profile for main display
         plot_image = None
         if self.profile_data:
-            try:
-                plot_image = os.path.join(tempfile.gettempdir(), 'profile_plot_current.png')
-                PlotGenerator.generate_profile_plot(self.profile_data, plot_image, dpi=300)
-            except Exception as e:
-                QgsMessageLog.logMessage(f"Current plot generation failed: {str(e)}", 
-                                       "DualProfileViewer", Qgis.Warning)
+            # Check if this is multi-section data
+            if self.profile_data.get('multi_section'):
+                # Generate multi-section plot
+                try:
+                    from .multi_section_handler import MultiSectionHandler
+                    plot_image = os.path.join(tempfile.gettempdir(), 'multi_section_plot.png')
+                    fig = MultiSectionHandler.create_matplotlib_multi_section(self.profile_data['sections'])
+                    if fig:
+                        fig.savefig(plot_image, dpi=300, bbox_inches='tight')
+                        import matplotlib.pyplot as plt
+                        plt.close(fig)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Multi-section plot generation failed: {str(e)}", 
+                                           "DualProfileViewer", Qgis.Warning)
+            else:
+                # Regular profile plot
+                try:
+                    plot_image = os.path.join(tempfile.gettempdir(), 'profile_plot_current.png')
+                    PlotGenerator.generate_profile_plot(self.profile_data, plot_image, dpi=300)
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Current plot generation failed: {str(e)}", 
+                                           "DualProfileViewer", Qgis.Warning)
         
         # Generate layout with all sections
         generator = LayoutGenerator(self.iface)
+        
+        # Check if we have AI report
+        ai_report_text = getattr(self, 'last_ai_report', None)
+        
         layout = generator.create_profile_layout(
             self.profile_data or (self.all_sections[0]['profile_data'] if self.all_sections else {}),
             plot_image_path=plot_image,
-            all_sections=self.all_sections if len(self.all_sections) > 0 else None
+            all_sections=self.all_sections if len(self.all_sections) > 0 else None,
+            ai_report_text=ai_report_text
         )
         
         if layout:
@@ -2243,13 +2311,33 @@ DEM Difference (Primary - Comparison):
         try:
             from .ai_report_generator import AIReportGenerator
             
-            if not self.profile_data:
+            if not self.profile_data and not self.all_sections:
                 QtWidgets.QMessageBox.warning(self, "Warning", "No profile data available for report generation")
                 return
                 
+            # Prepare data for AI report - include all sections if available
+            report_data = {}
+            if self.all_sections:
+                # Include all sections data
+                report_data['all_sections'] = self.all_sections
+                report_data['section_count'] = len(self.all_sections)
+                # Include current profile data if available
+                if self.profile_data:
+                    report_data.update(self.profile_data)
+                else:
+                    # Use first section data as base
+                    report_data.update(self.all_sections[0]['profile_data'])
+            else:
+                # Use current profile data
+                report_data = self.profile_data
+                
             # Open AI report dialog
-            ai_dialog = AIReportGenerator(self.profile_data, parent=self)
-            ai_dialog.exec_()
+            ai_dialog = AIReportGenerator(report_data, parent=self)
+            if ai_dialog.exec_():
+                # Store the generated report
+                self.last_ai_report = ai_dialog.get_report_text()
+            else:
+                self.last_ai_report = None
             
         except ImportError:
             QtWidgets.QMessageBox.information(self, "AI Report Generator", 

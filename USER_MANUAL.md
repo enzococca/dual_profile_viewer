@@ -3,511 +3,603 @@
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Installation Guide](#installation-guide)
-3. [Quick Start Tutorial](#quick-start-tutorial)
-4. [Core Features](#core-features)
-5. [Advanced 3D Visualization](#advanced-3d-visualization)
-6. [Archaeological Workflows](#archaeological-workflows)
-7. [Case Studies](#case-studies)
-8. [Export Options](#export-options)
-9. [Tips & Best Practices](#tips-best-practices)
+3. [Quick Start](#quick-start)
+4. [Interface Overview](#interface-overview)
+5. [Drawing Profiles](#drawing-profiles)
+6. [Visualization Features](#visualization-features)
+7. [Multi-DEM Analysis](#multi-dem-analysis)
+8. [Export and Output](#export-and-output)
+9. [Advanced Features](#advanced-features)
 10. [Troubleshooting](#troubleshooting)
+11. [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Introduction
 
-The Dual Profile Viewer is a professional QGIS plugin designed specifically for archaeological terrain analysis. It creates parallel elevation profiles from DEM/DTM data with advanced 3D visualization capabilities, enabling detailed analysis of archaeological features.
+The Dual Profile Viewer is a comprehensive QGIS plugin for advanced elevation profile analysis. It offers single/dual profile modes, polygon multi-section support, 3D visualization, and professional output capabilities.
 
-### Key Benefits
-- **Precision Analysis**: Sub-meter accuracy for archaeological features
-- **3D Visualization**: Industry-leading PyVista integration
-- **Scientific Documentation**: Publication-ready outputs
-- **Workflow Optimization**: Streamlined archaeological workflows
+### Key Capabilities
+- **Profile Modes**: Single, dual parallel, and polygon multi-section
+- **3D Visualization**: PyVista and Plotly integration
+- **Multi-DEM Support**: Compare multiple elevation models
+- **Professional Output**: Layouts, vector export, AI reports
+- **Real-time Preview**: See profiles while drawing
 
 ## Installation Guide
 
-### System Requirements
-- **QGIS**: Version 3.0 or higher
-- **Python**: 3.7+
-- **RAM**: 4GB minimum (8GB recommended for 3D)
-- **Graphics**: OpenGL 3.3+ support
+### Prerequisites
+- QGIS 3.16 or higher
+- Python 3.7+
+- 4GB RAM minimum (8GB for 3D features)
+- OpenGL support for 3D visualization
 
-### Step-by-Step Installation
+### Installation Methods
 
-#### Method 1: QGIS Plugin Repository
+#### Via QGIS Plugin Manager (Recommended)
 1. Open QGIS
-2. Navigate to `Plugins` → `Manage and Install Plugins`
+2. Go to `Plugins` → `Manage and Install Plugins`
 3. Search for "Dual Profile Viewer"
 4. Click `Install Plugin`
 5. Restart QGIS if prompted
 
-#### Method 2: Manual Installation
+#### Manual Installation
 ```bash
-# Download the plugin
-wget https://github.com/enzococca/dual_profile_viewer/archive/main.zip
+# Clone or download the plugin
+git clone https://github.com/yourusername/dual_profile_viewer.git
 
-# Extract to plugins folder
+# Copy to QGIS plugins directory
 # Windows
-unzip main.zip -d %APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\
+copy dual_profile_viewer "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\"
 
 # macOS
-unzip main.zip -d ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/
+cp -r dual_profile_viewer ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/
 
 # Linux
-unzip main.zip -d ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
+cp -r dual_profile_viewer ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
 ```
 
 ### Installing Dependencies
 
-#### Core Dependencies (Automatic)
-The plugin will automatically prompt to install:
-- numpy
-- plotly
-
-#### 3D Visualization Dependencies
+#### Required (Auto-installed)
 ```bash
-# Recommended: PyVista
-pip install pyvista pyvistaqt
-
-# Alternative if PyVista fails
-pip install vispy
+pip install numpy matplotlib plotly
 ```
 
-## Quick Start Tutorial
+#### Optional for 3D Features
+```bash
+# PyVista for advanced 3D
+pip install pyvista vtk
 
-### Your First Profile (2 minutes)
+# For AI reports
+pip install requests
+```
 
-1. **Load DEM Data**
-   - Open QGIS
-   - Load your DEM: `Layer` → `Add Layer` → `Add Raster Layer`
-   - Select your DEM file
+## Quick Start
+
+### Basic Workflow (5 minutes)
+
+1. **Load Data**
+   - Add DEM/DTM raster to QGIS
+   - Ensure proper CRS is set
 
 2. **Open Plugin**
-   - Click the Dual Profile Viewer icon in toolbar
-   - Or go to `Raster` → `Dual Profile Viewer`
+   - Click toolbar icon or
+   - Menu: `Plugins` → `Dual Profile Viewer`
 
-3. **Configure Settings**
-   - **DEM Layer**: Select from dropdown
-   - **Offset**: 2m (for a typical wall)
-   - **Points**: 200 (good detail)
-   - **Interpolation**: Linear
+3. **Select DEM**
+   - Choose from dropdown
+   - Verify selection shows elevation range
 
 4. **Draw Profile**
-   - Click "Draw Profile" button
-   - Click once to start line
-   - Move perpendicular to feature
-   - Click again to finish
+   - Click drawing mode button
+   - Click start and end points on map
+   - View generated profile
 
-5. **Analyze Results**
-   - View interactive graph
-   - Red line = Profile A
-   - Blue line = Profile B
-   - Hover for exact values
+5. **Analyze**
+   - Examine 2D plot
+   - Open 3D viewer
+   - Export results
 
-6. **3D Visualization**
-   - Click "🎨 3D Visualization"
-   - Explore in 3D space
-   - Adjust vertical exaggeration
+## Interface Overview
 
-## Core Features
+### Main Window Components
 
-### Profile Drawing Tool
+#### Top Toolbar
+- **DEM Selector**: Dropdown list of loaded rasters
+- **Refresh**: Update DEM list
+- **Browse**: Add multiple DEMs for comparison
 
 #### Drawing Controls
-- **Left Click**: Start/end profile line
-- **Mouse Move**: Preview parallel lines
-- **ESC**: Cancel current drawing
-- **Right Click**: Context menu
+- **Draw Section**: Standard dual profile mode
+- **Single Section**: Individual profile only
+- **Polygon Section**: Multi-section from polygon
 
-#### Parameters
-| Parameter | Range | Default | Use Case |
-|-----------|-------|---------|----------|
-| Offset | 0.5-100m | 2m | Wall width/feature size |
-| Points | 10-1000 | 200 | Resolution vs performance |
-| Interpolation | 3 types | Linear | Terrain characteristics |
+#### Parameters Panel
+- **Offset Distance**: Space between parallel profiles (0.5-1000m)
+- **Sample Points**: Profile resolution (50-1000)
+- **Interpolation**: Linear or cubic
 
-### Interactive 2D Graphs
+#### Visualization Tabs
+- **Plot**: 2D elevation graphs
+- **3D View**: Terrain visualization
+- **Statistics**: Numerical analysis
+- **Report**: AI-generated insights
 
-#### Graph Features
-- **Zoom**: Scroll wheel or box select
-- **Pan**: Click and drag
-- **Hover**: Display exact values
-- **Export**: Download as image/data
-- **Reset**: Double-click to reset view
+#### Action Buttons
+- **Clear**: Remove current profiles
+- **Export**: Save as vector/image
+- **Layout**: Generate print layout
+- **Statistics**: View detailed metrics
 
-#### Statistical Display
-- Minimum/maximum elevations
-- Average gradient
-- Total distance
-- Elevation difference
+## Drawing Profiles
 
-## Advanced 3D Visualization
+### Single Section Mode
 
-### 3D Viewer Interface
+Perfect for simple transects:
 
-#### Main Controls
-- **Vertical Exaggeration**: 0.1x - 5.0x slider
-- **Opacity**: 0-100% transparency
-- **Edges**: Toggle wireframe display
-- **Grid**: Show/hide reference grid
-- **Intersections**: Auto-calculate crossing points
+1. **Activate**: Click `Single Section` button
+2. **Draw**: 
+   - First click: Start point
+   - Move mouse: See preview line
+   - Second click: End point
+3. **Result**: Single elevation profile displayed
 
-#### Texture Options
-1. **Solid Color**: Traditional red/blue
-2. **Elevation Gradient**: Color by height
-3. **Slope Gradient**: Color by steepness
-4. **Custom**: User-defined colors
+**Use Cases**:
+- Quick elevation checks
+- Simple cross-sections
+- Path profiles
 
-#### Navigation
-- **Rotate**: Left-click + drag
-- **Zoom**: Mouse wheel
-- **Pan**: Middle-click + drag
-- **Reset**: Press 'R'
+### Dual Section Mode (Default)
 
-### Interactive Features
+Ideal for feature analysis:
 
-#### Point Interrogation
-1. Enable point picking mode
-2. Click on any point in 3D
-3. View coordinates and elevation
-4. Add to metadata table
-5. Export to attribute table
+1. **Set Parameters**:
+   - Offset distance (e.g., 2m for walls)
+   - Sample points (200 default)
 
-#### Section Management
-- Select individual sections
-- Adjust opacity for comparison
-- Scale sections independently
-- Calculate intersections
+2. **Draw Main Line**:
+   - Click start point
+   - Preview shows both lines
+   - Click end point
 
-#### Reference Tools
-- Add horizontal reference planes
-- Set elevation markers
-- Create measurement grids
-- Define stratigraphic levels
+3. **Automatic Generation**:
+   - A-A' (red): Main profile
+   - B-B' (blue): Parallel profile
+   - Both displayed in plot
 
-## Archaeological Workflows
+**Use Cases**:
+- Wall analysis
+- Ditch profiles
+- Road sections
 
-### Workflow 1: Roman Wall Analysis
+### Polygon Multi-Section Mode
 
-**Objective**: Document wall construction and preservation
+For comprehensive area analysis:
 
-1. **Data Preparation**
-   ```
-   DEM Resolution: 0.5m or better
-   Area: Wall section + 10m buffer
-   CRS: Local projected system
-   ```
+1. **Activate**: Click `Polygon Section`
+2. **Draw Polygon**:
+   - Click vertices sequentially
+   - Right-click to complete
+3. **Automatic Processing**:
+   - One profile per side
+   - All sections numbered
+   - Combined visualization
 
-2. **Profile Parameters**
-   ```
-   Offset: 2-3m (wall width)
-   Points: 300 (high detail)
-   Interpolation: Linear
-   Sections: Every 5m along wall
-   ```
+**Features**:
+- Supports any polygon shape
+- Color-coded sections
+- Intersection analysis in 3D
 
-3. **Analysis Steps**
-   - Draw perpendicular profiles
-   - Identify foundation levels
-   - Measure preserved height
-   - Note construction phases
-   - Document robbing trenches
+**Use Cases**:
+- Building foundations
+- Fortification analysis
+- Area surveys
 
-4. **3D Visualization**
-   - Load all sections
-   - Apply elevation gradient
-   - Set vertical exag to 2x
-   - Add reference plane at foundation
-   - Export for report
+### Drawing Tips
 
-### Workflow 2: Defensive Ditch System
+#### Precision Drawing
+- Use snapping for accuracy
+- Zoom in for detail
+- Hold Shift for straight lines
 
-**Objective**: Analyze ditch morphology and capacity
+#### Real-time Feedback
+- Preview shows while drawing
+- Offset updates dynamically
+- Elevation shown at cursor
 
-1. **Setup**
-   ```
-   Offset: 20m (full ditch width)
-   Points: 500 (capture detail)
-   Interpolation: Cubic (smooth)
-   ```
+## Visualization Features
 
-2. **Systematic Sampling**
-   - Profile every 10m
-   - Maintain consistent orientation
-   - Number sections sequentially
+### 2D Profile Plots
 
-3. **Analysis**
-   - Measure maximum depths
-   - Calculate cross-sectional area
-   - Identify recutting episodes
-   - Estimate water capacity
+#### Matplotlib View
+- **Static Plot**: High-quality rendering
+- **Features**:
+  - Grid toggle
+  - Axis scaling
+  - Export to image
+- **Best For**: Reports, printing
 
-4. **Volume Calculation**
-   - Export as polygons
-   - Calculate area per section
-   - Multiply by section spacing
-   - Sum for total volume
+#### Plotly Interactive
+- **Dynamic Plot**: Browser-based
+- **Features**:
+  - Zoom/pan
+  - Hover details
+  - Data export
+- **Best For**: Exploration, sharing
 
-### Workflow 3: Settlement Terraces
+#### Plot Controls
+- **Y-Axis**: Fixed or adaptive
+- **Grid**: Show/hide
+- **Legend**: Toggle visibility
+- **Export**: PNG, SVG, HTML
 
-**Objective**: Reconstruct terrace system
+### 3D Visualization
 
-1. **Grid Approach**
-   - Create profile grid
-   - 5m spacing
-   - Both orientations
+#### PyVista 3D Viewer
 
-2. **Height Analysis**
-   - Identify terrace edges
-   - Measure riser heights
-   - Calculate tread widths
-   - Map terrace boundaries
+**Opening**:
+1. Click `3D View (PyVista)` button
+2. Wait for initialization
+3. Interact with scene
 
-3. **3D Reconstruction**
-   - Load all profiles
-   - Enable intersections
-   - Add reference planes at each level
-   - Export 3D model
+**Controls**:
+- **Rotate**: Left mouse drag
+- **Zoom**: Right mouse or scroll
+- **Pan**: Middle mouse drag
+- **Reset**: Press 'r'
 
-## Case Studies
+**Features**:
+- Terrain mesh with profiles
+- Intersection highlighting
+- Vertical exaggeration
+- Multiple texture options
 
-### Case Study 1: Hadrian's Wall Fort
+**Display Options**:
+- **Surface**: Smooth terrain
+- **Wireframe**: Mesh view
+- **Points**: Vertex display
+- **Edges**: Show/hide
 
-**Site**: Vindolanda, UK
-**Feature**: Triple ditch system
-**Method**: LiDAR analysis
+#### Plotly 3D Web Viewer
 
-**Process**:
-1. Loaded 0.5m LiDAR DTM
-2. Created 15 profiles across ditches
-3. Offset: 25m (spanning all ditches)
-4. Points: 500 per profile
+**Advantages**:
+- No additional dependencies
+- Shareable HTML output
+- Works in any browser
 
-**Results**:
-- **Ditch 1**: 2.5m deep, V-shaped, military
-- **Ditch 2**: 2.1m deep, recut twice
-- **Ditch 3**: 1.8m deep, partially filled
-- **Volume**: ~15,000 m³ excavated
-- **Dating**: Construction phases identified
+**Features**:
+- Interactive rotation
+- Elevation coloring
+- Profile lines overlay
+- Export capabilities
 
-**3D Analysis**:
-- Intersection points showed drainage
-- Reference planes at Roman ground level
-- Slope analysis revealed erosion patterns
+### Visualization Settings
 
-### Case Study 2: Medieval Castle
+#### Color Schemes
+- Elevation gradients
+- Slope-based coloring
+- Custom palettes
+- Categorical schemes
 
-**Site**: Château de Montségur, France
-**Feature**: Inner and outer baileys
-**Method**: Drone photogrammetry
+#### Scaling Options
+- Vertical exaggeration (0.5-5x)
+- Horizontal scaling
+- Aspect ratio lock
+- Auto-scaling
 
-**Process**:
-1. Generated 0.1m DEM from drone
-2. Systematic profiles every 2m
-3. Offset: 3m for walls, 15m for ditches
+## Multi-DEM Analysis
 
-**Results**:
-- Wall heights: 3-7m surviving
-- Identified 3 construction phases
-- Located collapsed sections
-- Mapped internal structures
+### Adding Multiple DEMs
 
-**Visualization**:
-- 3D model showed defensive sight lines
-- Texture mapping revealed stone types
-- Export for virtual reconstruction
+1. **Browse for DEMs**:
+   - Click `Browse` button
+   - Select multiple files
+   - Supported: GeoTIFF, ASCII, IMG
 
-### Case Study 3: Prehistoric Hillfort
+2. **Manage List**:
+   - View selected DEMs
+   - Remove unwanted
+   - Set primary DEM
 
-**Site**: Maiden Castle, UK
-**Feature**: Multiple ramparts
-**Method**: Combined LiDAR and geophysics
+3. **Profile Extraction**:
+   - Automatic from all DEMs
+   - Same sample locations
+   - Synchronized display
 
-**Process**:
-1. Integrated LiDAR with resistivity
-2. Radial profiles from center
-3. Variable offsets per rampart
+### Comparison Features
 
-**Results**:
-- Mapped 4 rampart circuits
-- Heights: 8m, 6m, 4m, 3m
-- Identified entrance complexes
-- Calculated labor investment
+#### Side-by-Side Plots
+- Each DEM in subplot
+- Synchronized axes
+- Difference calculation
+- Statistics per DEM
 
-## Export Options
+#### Overlay Mode
+- All profiles on one plot
+- Color-coded by DEM
+- Legend with sources
+- Direct comparison
+
+#### Applications
+- Temporal analysis
+- Resolution comparison
+- Error assessment
+- Data validation
+
+## Export and Output
 
 ### Vector Export
 
-#### Available Formats
-| Format | Extension | Best For |
-|--------|-----------|----------|
-| Shapefile | .shp | GIS compatibility |
-| GeoPackage | .gpkg | Modern GIS |
-| GeoJSON | .geojson | Web mapping |
-| KML | .kml | Google Earth |
-| DXF | .dxf | CAD software |
+#### Profile as Polyline
+- **Format**: 3D line geometry
+- **Attributes**: Elevation, distance
+- **Use**: GIS analysis, CAD
 
-#### Geometry Types
-- **Polyline**: Profile lines
-- **Polygon**: Area between profiles
-- **Points**: Elevation samples
+#### Profile as Polygon
+- **Format**: Filled area geometry
+- **Attributes**: Area, volume
+- **Use**: Volume calculations
 
-### Data Export
+#### 3D Vector Export
+- **Format**: True 3D coordinates
+- **Attributes**: X, Y, Z values
+- **Use**: 3D GIS, modeling
 
-#### CSV Structure
-```csv
-Distance_m,X,Y,Z_ProfileA,Z_ProfileB,Difference
-0.00,523456.78,4123456.78,234.56,234.45,0.11
-1.25,523457.90,4123457.90,234.78,234.67,0.11
+#### Export Process
+1. Click `Export` button
+2. Choose export type
+3. Set parameters:
+   - Vertical exaggeration
+   - Scale factor
+   - Output format
+4. Save to file
+5. Add to map (optional)
+
+### Layout Generation
+
+#### Automated Layouts
+
+**Single Section**:
+- A4/A3 page size
+- Profile plot (left)
+- Location map (right)
+- Statistics table
+- Scale bar
+
+**Multi-Section**:
+- One page per section
+- Consistent formatting
+- Section overview map
+- Combined statistics
+
+#### Layout Customization
+- Page size and orientation
+- Element positioning
+- Colors and fonts
+- Logo/text addition
+
+#### Export Options
+- PDF (vector quality)
+- PNG/JPEG (raster)
+- SVG (editable)
+- Print directly
+
+### Statistics Export
+
+#### Available Metrics
+- **Elevation**: Min, max, mean, std dev
+- **Distance**: Total length, sampling
+- **Slope**: Average, maximum, distribution
+- **Volume**: Cut/fill estimates
+
+#### Export Formats
+- Text file (.txt)
+- CSV spreadsheet
+- Clipboard copy
+- Direct to report
+
+### AI Report Generation
+
+#### Setup
+1. Click `AI Report` button
+2. Choose service:
+   - OpenAI GPT-4
+   - Anthropic Claude
+3. Enter API key (saved)
+
+#### Report Options
+- Statistical analysis
+- Geological interpretation
+- Archaeological insights
+- Recommendations
+
+#### Output
+- Formatted text
+- HTML report
+- PDF export
+- Layout integration
+
+## Advanced Features
+
+### Batch Processing
+
+Process multiple profiles automatically:
+
+```python
+# Example script
+profiles = []
+for i in range(0, 1000, 50):
+    start = QgsPointXY(x + i, y)
+    end = QgsPointXY(x + i, y + 1000)
+    profile = viewer.extract_profile(start, end)
+    profiles.append(profile)
 ```
 
-### 3D Model Export
+### Custom Symbology
 
-#### Formats
-- **VTK**: Scientific visualization
-- **STL**: 3D printing
-- **OBJ**: 3D modeling
-- **PLY**: Point clouds
+#### Single Sections
+- Simple red line
+- Adjustable width
+- Transparency control
 
-### Image Export
+#### Dual Sections
+- Red (A-A'): Primary
+- Blue (B-B'): Secondary
+- Labeled automatically
 
-#### 2D Graphs
-- PNG (with world file)
-- SVG (vector graphics)
-- PDF (reports)
-- HTML (interactive)
+#### Multi-Sections
+- Rainbow color scheme
+- Numbered sequentially
+- Legend included
 
-#### 3D Views
-- Screenshot (current view)
-- High-res render
-- Animation sequences
+### Integration Features
 
-## Tips & Best Practices
+#### QGIS Processing
+- Available in toolbox
+- Batch processing
+- Model builder compatible
 
-### Data Preparation
-1. **Check DEM quality**: Remove artifacts
-2. **Verify CRS**: Use projected systems
-3. **Set no-data values**: Properly defined
-4. **Consider resolution**: Match to feature size
+#### Python API
+```python
+# Access from console
+from dual_profile_viewer import DualProfileViewer
+viewer = DualProfileViewer()
+viewer.extract_profile(layer, start, end)
+```
 
-### Profile Strategy
-1. **Perpendicular orientation**: Cross features at 90°
-2. **Consistent spacing**: Systematic sampling
-3. **Adequate offset**: Capture full feature
-4. **Sufficient points**: Balance detail/speed
-
-### 3D Optimization
-1. **Reduce points**: For performance
-2. **Disable edges**: When not needed
-3. **Lower opacity**: For overlapping sections
-4. **Use LOD**: Level of detail settings
-
-### Publication Quality
-1. **High resolution**: 300 DPI minimum
-2. **Consistent style**: Colors and fonts
-3. **Scale bars**: Always include
-4. **North arrow**: For orientation
-5. **Coordinate info**: CRS and units
+#### Attribute Table
+- Link to features
+- Store profile data
+- Update dynamically
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### No Elevation Data
-**Problem**: Profiles show no data
-**Solutions**:
-- Check DEM has valid values
-- Verify CRS matches project
-- Ensure profile intersects DEM
-- Check no-data value settings
-
-#### 3D Viewer Won't Open
-**Problem**: Error when opening 3D view
-**Solutions**:
+#### PyVista Won't Install
 ```bash
-# Install PyVista
-pip install pyvista pyvistaqt
+# Try conda instead
+conda install -c conda-forge pyvista
 
-# Check OpenGL
-python -c "import pyvista; pyvista.Report()"
-
-# Try alternative
-pip install vispy
+# Or specific versions
+pip install pyvista==0.38.0 vtk==9.2.0
 ```
 
-#### Slow Performance
-**Problem**: Lag in 3D viewer
+#### No Elevation Data
+**Check**:
+- DEM coverage area
+- CRS compatibility
+- No-data values
+- Raster validity
+
+**Fix**:
+- Reproject if needed
+- Set no-data value
+- Clip to area
+
+#### 3D Viewer Crashes
+**Causes**:
+- GPU driver issues
+- Memory limitations
+- VTK conflicts
+
 **Solutions**:
-- Reduce point count (<500)
-- Disable edge display
-- Lower number of sections
-- Close other applications
 - Update graphics drivers
+- Reduce point density
+- Use Plotly instead
 
-#### Export Errors
-**Problem**: Cannot export files
-**Solutions**:
-- Check write permissions
-- Verify path exists
-- Ensure valid filename
-- Check disk space
-- Try different format
+#### Export Fails
+**Check**:
+- Write permissions
+- Disk space
+- Valid data
+- Format support
 
-### Getting Help
+### Performance Optimization
 
-#### Support Channels
-- **GitHub Issues**: Bug reports
-- **Email**: enzo.ccc@gmail.com
-- **Wiki**: Documentation
-- **Forum**: QGIS community
+#### Large Datasets
+- Reduce sample points
+- Use pyramids/overviews
+- Limit 3D complexity
+- Close unused viewers
 
-#### Diagnostic Information
-When reporting issues, include:
-1. QGIS version
-2. Plugin version
-3. Operating system
-4. Error messages
-5. Sample data (if possible)
+#### Multiple Profiles
+- Process in batches
+- Use memory efficiently
+- Clear old data
+- Optimize rendering
 
-## Keyboard Shortcuts
+#### System Resources
+- Monitor RAM usage
+- GPU acceleration
+- Multiprocessing
+- Cache management
 
-### General
-- `ESC`: Cancel operation
-- `Ctrl+Z`: Undo
-- `F1`: Help
-- `Ctrl+S`: Save
+## Frequently Asked Questions
 
-### 3D Viewer
-- `R`: Reset view
-- `W`: Toggle wireframe
-- `G`: Toggle grid
-- `I`: Toggle intersections
-- `+/-`: Adjust point size
-- `Space`: Play/pause animation
+### General Usage
 
-## Advanced Configuration
+**Q: What DEM formats are supported?**
+A: All GDAL raster formats including GeoTIFF, ASCII Grid, IMG, HGT, etc.
 
-### Settings File
-`~/.qgis3/dual_profile_viewer/settings.json`
+**Q: Can I use multiple CRS?**
+A: Yes, automatic reprojection is handled by QGIS.
 
-```json
-{
-  "defaults": {
-    "offset": 2.0,
-    "points": 200,
-    "interpolation": "linear"
-  },
-  "3d": {
-    "vertical_exaggeration": 2.0,
-    "texture": "elevation",
-    "auto_intersections": true
-  },
-  "export": {
-    "format": "gpkg",
-    "precision": 2
-  }
-}
-```
+**Q: Maximum profile length?**
+A: No hard limit, but performance decreases beyond 50km.
+
+### Features
+
+**Q: Can I edit profiles after creation?**
+A: No, but you can redraw with different parameters.
+
+**Q: Is batch processing possible?**
+A: Yes, through Python scripting or Processing toolbox.
+
+**Q: Can I save my settings?**
+A: Settings are saved per QGIS project.
+
+### Technical
+
+**Q: Required Python version?**
+A: Python 3.7 or higher (QGIS 3.16+).
+
+**Q: GPU requirements for 3D?**
+A: OpenGL 3.3+ support, 2GB VRAM recommended.
+
+**Q: Network needed for AI reports?**
+A: Yes, for API calls to OpenAI/Claude.
+
+### Support
+
+**Q: Where to report bugs?**
+A: GitHub Issues page or email support.
+
+**Q: Is there video training?**
+A: Video tutorials in development.
+
+**Q: Commercial support?**
+A: Contact author for professional services.
 
 ---
 
-*Version 1.0.0 - Complete Documentation*
-*© 2024 Enzo Cocca - Archaeological GIS Solutions*
+## Appendices
+
+### Keyboard Shortcuts
+- **Esc**: Cancel drawing
+- **Delete**: Clear profiles
+- **F1**: Open help
+
+### File Locations
+- **Settings**: `~/.qgis3/profiles/default/`
+- **Logs**: `~/.qgis3/profiles/default/python/plugins/dual_profile_viewer/logs/`
+- **Cache**: System temp directory
+
+### Updates
+Check for updates in QGIS Plugin Manager or GitHub releases page.
+
+---
+
+**Version**: 2.0.0  
+**Last Updated**: December 2024  
+**Author**: Enzo Cocca  
+**License**: GPL v3.0

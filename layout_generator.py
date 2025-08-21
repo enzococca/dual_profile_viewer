@@ -375,37 +375,55 @@ Analysis by: Dual Profile Viewer Plugin"""
     
     def create_overview_page(self, profile_data, plot_image_path, view_3d_image_path):
         """Create the first overview page"""
-        # FIRST: Add border rectangle (so it's under everything)
-        self.add_grid_references()
-        
-        # Add title
-        self.add_title(profile_data)
-        
-        # Add main map showing section lines and store reference
-        self.map1 = self.add_main_map(profile_data)
-        
-        # Add profile plots
-        if plot_image_path:
-            self.add_profile_plots(plot_image_path)
-        
-        # Add 3D view
-        if view_3d_image_path:
-            self.add_3d_view(view_3d_image_path)
-        
-        # Add statistics table
-        self.add_statistics_table(profile_data)
-        
-        # Add scale bar linked to map1
-        self.add_scale_bar()
-        
-        # Add north arrow
-        self.add_north_arrow()
-        
-        # Add legend on the right
-        self.add_legend()
-        
-        # Add metadata
-        self.add_metadata(profile_data)
+        # Check if this is multi-section data
+        if profile_data.get('multi_section'):
+            # Use multi-section layout
+            from .multi_section_layout import MultiSectionLayoutGenerator
+            
+            # Add border
+            self.add_grid_references()
+            
+            # Add multi-section content
+            MultiSectionLayoutGenerator.add_multi_section_to_layout(
+                self.layout, profile_data, start_y=50
+            )
+            
+            # Add scale bar and north arrow
+            self.add_scale_bar()
+            self.add_north_arrow()
+            
+        else:
+            # FIRST: Add border rectangle (so it's under everything)
+            self.add_grid_references()
+            
+            # Add title
+            self.add_title(profile_data)
+            
+            # Add main map showing section lines and store reference
+            self.map1 = self.add_main_map(profile_data)
+            
+            # Add profile plots
+            if plot_image_path:
+                self.add_profile_plots(plot_image_path)
+            
+            # Add 3D view
+            if view_3d_image_path:
+                self.add_3d_view(view_3d_image_path)
+            
+            # Add statistics table
+            self.add_statistics_table(profile_data)
+            
+            # Add scale bar linked to map1
+            self.add_scale_bar()
+            
+            # Add north arrow
+            self.add_north_arrow()
+            
+            # Add legend on the right
+            self.add_legend()
+            
+            # Add metadata
+            self.add_metadata(profile_data)
     
     def add_section_page(self, section_data, section_number, page_number):
         """Add a page for an individual section"""

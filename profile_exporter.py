@@ -68,23 +68,44 @@ class ProfileExporter:
         # Process each profile
         profiles_to_export = []
         
-        # Profile 1 (A-A')
-        if 'profile1' in profile_data and profile_data['profile1'] is not None:
-            profiles_to_export.append({
-                'name': 'A-A\'',
-                'profile': profile_data['profile1'],
-                'line': profile_data['line1'],
-                'color': QColor(255, 0, 0)  # Red
-            })
-        
-        # Profile 2 (B-B')  
-        if 'profile2' in profile_data and profile_data['profile2'] is not None:
-            profiles_to_export.append({
-                'name': 'B-B\'',
-                'profile': profile_data['profile2'],
-                'line': profile_data['line2'],
-                'color': QColor(0, 0, 255)  # Blue
-            })
+        # Check if this is multi-section data
+        if profile_data.get('multi_section', False):
+            # Export multi-section data
+            sections = profile_data.get('sections', [])
+            colors = [QColor(255, 0, 0), QColor(0, 0, 255), QColor(0, 255, 0), 
+                     QColor(255, 255, 0), QColor(255, 0, 255), QColor(0, 255, 255)]
+            
+            for idx, section in enumerate(sections):
+                color = colors[idx % len(colors)]
+                profiles_to_export.append({
+                    'name': section.get('section_name', f'Section {idx + 1}'),
+                    'profile': {
+                        'distances': section['distances'],
+                        'elevations': section['elevations'],
+                        'x_coords': None,  # Will be calculated
+                        'y_coords': None   # Will be calculated
+                    },
+                    'line': [section['start'], section['end']],
+                    'color': color
+                })
+        else:
+            # Profile 1 (A-A')
+            if 'profile1' in profile_data and profile_data['profile1'] is not None:
+                profiles_to_export.append({
+                    'name': 'A-A\'',
+                    'profile': profile_data['profile1'],
+                    'line': profile_data['line1'],
+                    'color': QColor(255, 0, 0)  # Red
+                })
+            
+            # Profile 2 (B-B')  
+            if 'profile2' in profile_data and profile_data['profile2'] is not None:
+                profiles_to_export.append({
+                    'name': 'B-B\'',
+                    'profile': profile_data['profile2'],
+                    'line': profile_data['line2'],
+                    'color': QColor(0, 0, 255)  # Blue
+                })
         
         features = []
         

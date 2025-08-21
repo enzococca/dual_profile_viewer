@@ -207,9 +207,14 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         toolbar = QtWidgets.QToolBar()
         toolbar.setIconSize(QtCore.QSize(24, 24))
         
-        # Draw action
-        self.draw_action = toolbar.addAction("📏 Draw Lines")
-        self.draw_action.setToolTip("Draw profile lines")
+        # Draw single line action
+        self.draw_single_action = toolbar.addAction("➖ Single Line")
+        self.draw_single_action.setToolTip("Draw single profile line")
+        self.draw_single_action.triggered.connect(self.start_single_drawing)
+        
+        # Draw dual lines action
+        self.draw_action = toolbar.addAction("📏 Dual Lines")
+        self.draw_action.setToolTip("Draw dual profile lines")
         self.draw_action.triggered.connect(self.start_drawing)
         
         # Draw polygon
@@ -271,6 +276,12 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         self.layout_action.setToolTip("Generate professional print layout")
         self.layout_action.triggered.connect(self.generate_layout)
         self.layout_action.setEnabled(False)
+        
+        # AI Report (optional)
+        self.ai_report_action = toolbar.addAction("🤖 AI Report")
+        self.ai_report_action.setToolTip("Generate AI analysis report")
+        self.ai_report_action.triggered.connect(self.generate_ai_report)
+        self.ai_report_action.setEnabled(False)
         
         return toolbar
         
@@ -402,6 +413,24 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         """Handle changes in DEM selection"""
         self.selected_dem_layers = selected_layers
         
+    def start_single_drawing(self):
+        """Activate single line drawing tool"""
+        if self.combo_dem.currentData() is None:
+            QtWidgets.QMessageBox.warning(self, "Warning", 
+                                         "Please select a DEM/DTM layer first!")
+            return
+            
+        # Create and activate single line tool
+        from .single_profile_tool import SingleProfileTool
+        self.map_tool = SingleProfileTool(self.iface.mapCanvas(), self.iface)
+        self.map_tool.profile_created.connect(self.on_single_line_drawn)
+        self.iface.mapCanvas().setMapTool(self.map_tool)
+        
+        # Update UI
+        self.draw_single_action.setEnabled(False)
+        self.draw_action.setEnabled(False)
+        self.create_action.setEnabled(True)
+        
     def start_drawing(self):
         """Activate drawing tool"""
         if self.combo_dem.currentData() is None:
@@ -416,6 +445,7 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         
         # Update UI
         self.draw_action.setEnabled(False)
+        self.draw_single_action.setEnabled(False)
         self.create_action.setEnabled(True)
         
         # Show status
@@ -426,6 +456,24 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
             duration=5
         )
         
+    def on_single_line_drawn(self, line):
+        """Handle completion of single line drawing"""
+        # Store as single line (no second line)
+        self.lines_drawn = (line, None, line)  # line1, None for line2, center_line
+        
+        # Enable create button
+        self.create_action.setEnabled(True)
+        
+        # Reset tool
+        self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.draw_single_action.setEnabled(True)
+        self.draw_action.setEnabled(True)
+        self.draw_polygon_action.setEnabled(True)
+        
+        # Show message
+        QtWidgets.QMessageBox.information(self, "Drawing Complete", 
+                                        "Single section drawn. Click '📊 Create' to generate elevation profile.")
+    
     def on_lines_drawn(self, line1, line2, center_line):
         """Handle completion of line drawing"""
         self.lines_drawn = (line1, line2, center_line)
@@ -435,6 +483,7 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         
         # Reset tool
         self.iface.mapCanvas().unsetMapTool(self.map_tool)
+        self.draw_single_action.setEnabled(True)
         self.draw_action.setEnabled(True)
         self.draw_polygon_action.setEnabled(True)
         
@@ -482,39 +531,66 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
     
     def on_polygon_drawn(self, polygon_data):
         """Handle completion of polygon drawing"""
-        # Extract profiles along the center line
-        center_line = polygon_data['center_line']
         polygon = polygon_data['polygon']
         width = polygon_data['width']
+        draw_type = polygon_data['type']
         
-        # Convert center line to points
-        if center_line.isMultipart():
-            points = center_line.asMultiPolyline()[0]
+        if draw_type == 'polygon' and 'sections' in polygon_data:
+            # Multiple sections from polygon sides
+            sections = polygon_data['sections']
+            message = f"Polygon drawn with {len(sections)} sections, each {width}m wide."
+            
+            # Store all sections for processing
+            self.polygon_sections = sections
+            self.polygon_mode = True
+            self.multi_section_mode = True
+            
+            # Store polygon data for multi-section processing
+            self.polygon_data_full = polygon_data
         else:
-            points = center_line.asPolyline()
+            # Single section (rectangle or freehand)
+            center_line = polygon_data['center_line']
             
-        if len(points) >= 2:
-            # Create parallel lines based on width
-            # For now, use the center line for both
-            self.lines_drawn = (points, points, points)
-            self.polygon_width = width
-            self.section_polygon = polygon
+            # Convert center line to points
+            if center_line.isMultipart():
+                points = center_line.asMultiPolyline()[0]
+            else:
+                points = center_line.asPolyline()
+                
+            if len(points) >= 2:
+                self.lines_drawn = (points, points, points)
+                
+            message = f"Section drawn with {width}m width."
+            self.polygon_mode = False
+            self.multi_section_mode = False
             
-            # Enable create button
-            self.create_action.setEnabled(True)
-            
-            # Reset tool
-            self.iface.mapCanvas().unsetMapTool(self.polygon_tool)
-            self.draw_action.setEnabled(True)
-            self.draw_polygon_action.setEnabled(True)
-            
-            # Show message
-            QtWidgets.QMessageBox.information(self, "Drawing Complete", 
-                f"Polygon section drawn with {width}m width. Click '📊 Create' to generate elevation profiles.")
+        self.polygon_width = width
+        self.section_polygon = polygon
+        
+        # Enable create button
+        self.create_action.setEnabled(True)
+        
+        # Reset tool
+        self.iface.mapCanvas().unsetMapTool(self.polygon_tool)
+        self.draw_action.setEnabled(True)
+        self.draw_single_action.setEnabled(True)
+        self.draw_polygon_action.setEnabled(True)
+        
+        # Show message with polygon explanation
+        info_text = message + "\n\nPolygon Mode Explanation:\n"
+        info_text += "- Rectangle: Creates a single rectangular section\n"
+        info_text += "- Polygon: Creates one section for each side of the polygon\n"
+        info_text += "- Freehand: Creates a curved section following your drawing\n\n"
+        info_text += "Click '📊 Create' to generate elevation profiles."
+        
+        QtWidgets.QMessageBox.information(self, "Drawing Complete", info_text)
         
     def create_profiles(self):
         """Create profiles from drawn lines"""
-        if self.lines_drawn:
+        if hasattr(self, 'multi_section_mode') and self.multi_section_mode and hasattr(self, 'polygon_data_full'):
+            # Handle multiple sections from polygon
+            self.extract_polygon_profiles()
+        elif self.lines_drawn:
             line1, line2, center_line = self.lines_drawn
             self.extract_profiles(line1, line2, center_line)
         else:
@@ -532,13 +608,32 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
             
         num_samples = self.spin_samples.value()
         
+        # Handle single line mode
+        single_mode = line2 is None
+        
         # Sample along lines
-        profile1 = self.sample_raster_along_line(
-            dem_layer, line1[0], line1[1], num_samples
-        )
-        profile2 = self.sample_raster_along_line(
-            dem_layer, line2[0], line2[1], num_samples
-        )
+        if isinstance(line1, QgsGeometry):
+            # Single line mode - extract points from geometry
+            points = line1.asPolyline()
+            if len(points) >= 2:
+                profile1 = self.sample_raster_along_line(
+                    dem_layer, points[0], points[1], num_samples
+                )
+            else:
+                return
+        else:
+            # Dual line mode - line1 is a tuple of points
+            profile1 = self.sample_raster_along_line(
+                dem_layer, line1[0], line1[1], num_samples
+            )
+        
+        # Only extract second profile if in dual mode
+        if not single_mode:
+            profile2 = self.sample_raster_along_line(
+                dem_layer, line2[0], line2[1], num_samples
+            )
+        else:
+            profile2 = None
         
         # Initialize variables for multi-DEM
         profile1_dem2 = None
@@ -557,22 +652,38 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
                     # For backward compatibility, store first comparison DEM separately
                     if profile1_dem2 is None:
                         dem2_name = dem_layer_comp.name()
-                        profile1_dem2 = self.sample_raster_along_line(
-                            dem_layer_comp, line1[0], line1[1], num_samples
-                        )
-                        profile2_dem2 = self.sample_raster_along_line(
-                            dem_layer_comp, line2[0], line2[1], num_samples
-                        )
-                    else:
-                        # Store additional DEMs
-                        additional_profiles[dem_layer_comp.name()] = {
-                            'profile1': self.sample_raster_along_line(
+                        if single_mode:
+                            points = line1.asPolyline()
+                            profile1_dem2 = self.sample_raster_along_line(
+                                dem_layer_comp, points[0], points[1], num_samples
+                            )
+                            profile2_dem2 = None
+                        else:
+                            profile1_dem2 = self.sample_raster_along_line(
                                 dem_layer_comp, line1[0], line1[1], num_samples
-                            ),
-                            'profile2': self.sample_raster_along_line(
+                            )
+                            profile2_dem2 = self.sample_raster_along_line(
                                 dem_layer_comp, line2[0], line2[1], num_samples
                             )
-                        }
+                    else:
+                        # Store additional DEMs
+                        if single_mode:
+                            points = line1.asPolyline()
+                            additional_profiles[dem_layer_comp.name()] = {
+                                'profile1': self.sample_raster_along_line(
+                                    dem_layer_comp, points[0], points[1], num_samples
+                                ),
+                                'profile2': None
+                            }
+                        else:
+                            additional_profiles[dem_layer_comp.name()] = {
+                                'profile1': self.sample_raster_along_line(
+                                    dem_layer_comp, line1[0], line1[1], num_samples
+                                ),
+                                'profile2': self.sample_raster_along_line(
+                                    dem_layer_comp, line2[0], line2[1], num_samples
+                                )
+                            }
         
         # Save data
         self.profile_data = {
@@ -587,7 +698,8 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
             'dem1_name': dem_layer.name(),
             'dem2_name': dem2_name,
             'additional_profiles': additional_profiles,
-            'section_number': self.section_count + 1  # Will be incremented when creating layer
+            'section_number': self.section_count + 1,
+            'single_mode': single_mode  # Flag to indicate single line mode
         }
         
         # Update profile list for 3D viewer
@@ -678,101 +790,146 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         if not self.profile_data:
             return None
             
-        # Create subplots - 4 graphs: overlapped profiles, individual profiles, differences
-        fig = make_subplots(
-            rows=2, cols=2,
-            shared_xaxes=True,
-            vertical_spacing=0.15,
-            horizontal_spacing=0.1,
-            subplot_titles=('Overlapped Profiles', 'Elevation Differences',
-                          'Profile A-A\'', 'Profile B-B\'')
-        )
+        # Check if this is multi-section data
+        if self.profile_data.get('multi_section', False):
+            # Use multi-section plotting
+            from .multi_section_handler import MultiSectionHandler
+            return MultiSectionHandler.create_multi_section_plots(
+                self.profile_data.get('sections', []), use_plotly=True
+            )
+            
+        single_mode = self.profile_data.get('single_mode', False)
+        
+        if single_mode:
+            # Single profile mode - simpler layout
+            fig = make_subplots(
+                rows=1, cols=1,
+                subplot_titles=('Elevation Profile',)
+            )
+        else:
+            # Dual profile mode - 4 graphs
+            fig = make_subplots(
+                rows=2, cols=2,
+                shared_xaxes=True,
+                vertical_spacing=0.15,
+                horizontal_spacing=0.1,
+                subplot_titles=('Overlapped Profiles', 'Elevation Differences',
+                              'Profile A-A\'', 'Profile B-B\'')
+            )
         
         # Plot primary DEM
         profile1 = self.profile_data['profile1']
         profile2 = self.profile_data['profile2']
         
-        # Top left - Overlapped profiles
-        fig.add_trace(
-            go.Scatter(
-                x=profile1['distances'],
-                y=profile1['elevations'],
-                mode='lines',
-                name=f"A-A' ({self.profile_data['dem1_name']})",
-                line=dict(color='red', width=2),
-                showlegend=True
-            ),
-            row=1, col=1
-        )
+        if single_mode:
+            # Single profile plot
+            fig.add_trace(
+                go.Scatter(
+                    x=profile1['distances'],
+                    y=profile1['elevations'],
+                    mode='lines',
+                    name=f"Profile ({self.profile_data['dem1_name']})",
+                    line=dict(color='red', width=2),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+        else:
+            # Top left - Overlapped profiles
+            fig.add_trace(
+                go.Scatter(
+                    x=profile1['distances'],
+                    y=profile1['elevations'],
+                    mode='lines',
+                    name=f"A-A' ({self.profile_data['dem1_name']})",
+                    line=dict(color='red', width=2),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=profile2['distances'],
+                    y=profile2['elevations'],
+                    mode='lines',
+                    name=f"B-B' ({self.profile_data['dem1_name']})",
+                    line=dict(color='blue', width=2),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
         
-        fig.add_trace(
-            go.Scatter(
-                x=profile2['distances'],
-                y=profile2['elevations'],
-                mode='lines',
-                name=f"B-B' ({self.profile_data['dem1_name']})",
-                line=dict(color='blue', width=2),
-                showlegend=True
-            ),
-            row=1, col=1
-        )
-        
-        # Bottom left - Profile A-A' individual
-        fig.add_trace(
-            go.Scatter(
-                x=profile1['distances'],
-                y=profile1['elevations'],
-                mode='lines',
-                name=f"A-A' ({self.profile_data['dem1_name']})",
-                line=dict(color='red', width=2),
-                showlegend=False
-            ),
-            row=2, col=1
-        )
-        
-        # Bottom right - Profile B-B' individual
-        fig.add_trace(
-            go.Scatter(
-                x=profile2['distances'],
-                y=profile2['elevations'],
-                mode='lines',
-                name=f"B-B' ({self.profile_data['dem1_name']})",
-                line=dict(color='blue', width=2),
-                showlegend=False
-            ),
-            row=2, col=2
-        )
-        
-        # Top right - Elevation differences
-        diff = profile1['elevations'] - profile2['elevations']
-        fig.add_trace(
-            go.Scatter(
-                x=profile1['distances'],
-                y=diff,
-                mode='lines',
-                name='A-A\' minus B-B\'',
-                line=dict(color='green', width=2),
-                fill='tozeroy',
-                fillcolor='rgba(0,255,0,0.2)'
-            ),
-            row=1, col=2
-        )
+        if not single_mode:
+            # Bottom left - Profile A-A' individual
+            fig.add_trace(
+                go.Scatter(
+                    x=profile1['distances'],
+                    y=profile1['elevations'],
+                    mode='lines',
+                    name=f"A-A' ({self.profile_data['dem1_name']})",
+                    line=dict(color='red', width=2),
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+            
+            # Bottom right - Profile B-B' individual
+            fig.add_trace(
+                go.Scatter(
+                    x=profile2['distances'],
+                    y=profile2['elevations'],
+                    mode='lines',
+                    name=f"B-B' ({self.profile_data['dem1_name']})",
+                    line=dict(color='blue', width=2),
+                    showlegend=False
+                ),
+                row=2, col=2
+            )
+            
+            # Top right - Elevation differences
+            diff = profile1['elevations'] - profile2['elevations']
+            fig.add_trace(
+                go.Scatter(
+                    x=profile1['distances'],
+                    y=diff,
+                    mode='lines',
+                    name='A-A\' minus B-B\'',
+                    line=dict(color='green', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(0,255,0,0.2)'
+                ),
+                row=1, col=2
+            )
         
         # Plot comparison DEMs if available
         if self.profile_data['profile1_dem2'] is not None:
             profile1_dem2 = self.profile_data['profile1_dem2']
             profile2_dem2 = self.profile_data['profile2_dem2']
             
-            # Add to overlapped view
-            fig.add_trace(
-                go.Scatter(
-                    x=profile1_dem2['distances'],
-                    y=profile1_dem2['elevations'],
-                    mode='lines',
-                    name=f"A-A' ({self.profile_data['dem2_name']})",
-                    line=dict(color='orange', width=2, dash='dash')
-                ),
-                row=1, col=1
+            if single_mode:
+                # Add comparison DEM to single plot
+                fig.add_trace(
+                    go.Scatter(
+                        x=profile1_dem2['distances'],
+                        y=profile1_dem2['elevations'],
+                        mode='lines',
+                        name=f"Profile ({self.profile_data['dem2_name']})",
+                        line=dict(color='orange', width=2, dash='dash')
+                    ),
+                    row=1, col=1
+                )
+            else:
+                # Add to overlapped view
+                fig.add_trace(
+                    go.Scatter(
+                        x=profile1_dem2['distances'],
+                        y=profile1_dem2['elevations'],
+                        mode='lines',
+                        name=f"A-A' ({self.profile_data['dem2_name']})",
+                        line=dict(color='orange', width=2, dash='dash')
+                    ),
+                    row=1, col=1
             )
             
             fig.add_trace(
@@ -910,57 +1067,100 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         # Clear figure
         self.figure.clear()
         
-        # Create subplots
-        ax1 = self.figure.add_subplot(2, 1, 1)
-        ax2 = self.figure.add_subplot(2, 1, 2, sharex=ax1)
+        # Check if this is multi-section data
+        if self.profile_data.get('multi_section', False):
+            # Use multi-section plotting
+            self.plot_multi_section_profiles()
+            return
         
-        # Plot primary DEM
+        # Check if single mode
+        single_mode = self.profile_data.get('single_mode', False)
         profile1 = self.profile_data['profile1']
         profile2 = self.profile_data['profile2']
         
-        ax1.plot(profile1['distances'], profile1['elevations'], 
-                 'r-', linewidth=2, label=f"A-A' ({self.profile_data['dem1_name']})")
-        ax2.plot(profile2['distances'], profile2['elevations'], 
-                 'b-', linewidth=2, label=f"B-B' ({self.profile_data['dem1_name']})")
-        
-        # Plot comparison DEMs if available
-        if self.profile_data['profile1_dem2'] is not None:
-            profile1_dem2 = self.profile_data['profile1_dem2']
-            profile2_dem2 = self.profile_data['profile2_dem2']
+        if single_mode or profile2 is None:
+            # Single profile plot
+            ax = self.figure.add_subplot(1, 1, 1)
             
-            ax1.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
-                     'orange', linewidth=2, linestyle='--', 
-                     label=f"A-A' ({self.profile_data['dem2_name']})")
-            ax2.plot(profile2_dem2['distances'], profile2_dem2['elevations'], 
-                     'green', linewidth=2, linestyle='--', 
-                     label=f"B-B' ({self.profile_data['dem2_name']})")
+            ax.plot(profile1['distances'], profile1['elevations'], 
+                     'r-', linewidth=2, label=f"Profile ({self.profile_data['dem1_name']})")
+                     
+            # Plot comparison DEMs if available
+            if self.profile_data['profile1_dem2'] is not None:
+                profile1_dem2 = self.profile_data['profile1_dem2']
+                ax.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
+                         'orange', linewidth=2, linestyle='--', 
+                         label=f"Profile ({self.profile_data['dem2_name']})")
+                         
+            # Plot additional DEMs
+            if 'additional_profiles' in self.profile_data:
+                colors = ['purple', 'brown', 'pink', 'gray', 'olive']
+                color_idx = 0
+                for dem_name, profiles in self.profile_data['additional_profiles'].items():
+                    if profiles['profile1'] is not None:
+                        color = colors[color_idx % len(colors)]
+                        ax.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
+                                 color=color, linewidth=2, linestyle=':',
+                                 label=f"Profile ({dem_name})")
+                        color_idx += 1
+                        
+            ax.set_xlabel('Distance (m)')
+            ax.set_ylabel('Elevation (m)')
+            ax.set_title('Elevation Profile')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            
+        else:
+            # Dual profile plot
+            ax1 = self.figure.add_subplot(2, 1, 1)
+            ax2 = self.figure.add_subplot(2, 1, 2, sharex=ax1)
+            
+            ax1.plot(profile1['distances'], profile1['elevations'], 
+                     'r-', linewidth=2, label=f"A-A' ({self.profile_data['dem1_name']})")
+            ax2.plot(profile2['distances'], profile2['elevations'], 
+                     'b-', linewidth=2, label=f"B-B' ({self.profile_data['dem1_name']})")
         
-        # Plot additional DEMs
-        if 'additional_profiles' in self.profile_data:
-            colors = ['purple', 'brown', 'pink', 'gray', 'olive']
-            color_idx = 0
-            for dem_name, profiles in self.profile_data['additional_profiles'].items():
-                color = colors[color_idx % len(colors)]
+            # Plot comparison DEMs if available
+            if self.profile_data['profile1_dem2'] is not None:
+                profile1_dem2 = self.profile_data['profile1_dem2']
+                profile2_dem2 = self.profile_data['profile2_dem2']
                 
-                ax1.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
-                         color=color, linewidth=2, linestyle=':',
-                         label=f"A-A' ({dem_name})")
-                ax2.plot(profiles['profile2']['distances'], profiles['profile2']['elevations'],
-                         color=color, linewidth=2, linestyle=':',
-                         label=f"B-B' ({dem_name})")
-                color_idx += 1
+                ax1.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
+                         'orange', linewidth=2, linestyle='--', 
+                         label=f"A-A' ({self.profile_data['dem2_name']})")
+                if profile2_dem2 is not None:
+                    ax2.plot(profile2_dem2['distances'], profile2_dem2['elevations'], 
+                             'green', linewidth=2, linestyle='--', 
+                             label=f"B-B' ({self.profile_data['dem2_name']})")
         
-        # Format axes
-        ax1.set_ylabel('Elevation (m)')
-        ax1.set_title('Profile A-A\'')
-        ax1.grid(True, alpha=0.3)
-        ax1.legend()
-        
-        ax2.set_xlabel('Distance (m)')
-        ax2.set_ylabel('Elevation (m)')
-        ax2.set_title('Profile B-B\'')
-        ax2.grid(True, alpha=0.3)
-        ax2.legend()
+            # Plot additional DEMs
+            if 'additional_profiles' in self.profile_data:
+                colors = ['purple', 'brown', 'pink', 'gray', 'olive']
+                color_idx = 0
+                for dem_name, profiles in self.profile_data['additional_profiles'].items():
+                    color = colors[color_idx % len(colors)]
+                    
+                    if profiles['profile1'] is not None:
+                        ax1.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
+                                 color=color, linewidth=2, linestyle=':',
+                                 label=f"A-A' ({dem_name})")
+                    if profiles['profile2'] is not None:
+                        ax2.plot(profiles['profile2']['distances'], profiles['profile2']['elevations'],
+                                 color=color, linewidth=2, linestyle=':',
+                                 label=f"B-B' ({dem_name})")
+                    color_idx += 1
+            
+            # Format axes
+            ax1.set_ylabel('Elevation (m)')
+            ax1.set_title('Profile A-A\'')
+            ax1.grid(True, alpha=0.3)
+            ax1.legend()
+            
+            ax2.set_xlabel('Distance (m)')
+            ax2.set_ylabel('Elevation (m)')
+            ax2.set_title('Profile B-B\'')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend()
         
         self.figure.tight_layout()
         self.canvas.draw()
@@ -970,14 +1170,46 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         if not self.profile_data:
             return
             
+        # Check if this is multi-section data
+        if self.profile_data.get('multi_section', False):
+            # Use multi-section statistics
+            self.update_multi_section_statistics()
+            return
+            
         profile1 = self.profile_data['profile1']
         profile2 = self.profile_data['profile2']
+        single_mode = self.profile_data.get('single_mode', False)
         
-        # Calculate statistics
-        diff = profile1['elevations'] - profile2['elevations']
-        valid_diff = diff[~np.isnan(diff)]
+        # Calculate statistics based on mode
+        if single_mode or profile2 is None:
+            # Single profile mode
+            stats_text = f"""📊 PROFILE STATISTICS
+━━━━━━━━━━━━━━━━━━
+Primary DEM: {self.profile_data['dem1_name']}
+
+Profile:
+  Min: {np.nanmin(profile1['elevations']):.3f} m
+  Max: {np.nanmax(profile1['elevations']):.3f} m
+  Mean: {np.nanmean(profile1['elevations']):.3f} m
+
+Section Length: {profile1['distances'][-1]:.2f} m
+Number of Samples: {len(profile1['distances'])}
+"""
+        else:
+            # Dual profile mode
+            # Handle NaN values properly before subtraction
+            mask1 = ~np.isnan(profile1['elevations'])
+            mask2 = ~np.isnan(profile2['elevations'])
+            valid_mask = mask1 & mask2  # Use bitwise AND instead of subtraction
+            
+            if np.any(valid_mask):
+                diff = np.full_like(profile1['elevations'], np.nan)
+                diff[valid_mask] = profile1['elevations'][valid_mask] - profile2['elevations'][valid_mask]
+                valid_diff = diff[valid_mask]
+            else:
+                valid_diff = np.array([])
         
-        stats_text = f"""📊 PROFILE STATISTICS
+            stats_text = f"""📊 PROFILE STATISTICS
 ━━━━━━━━━━━━━━━━━━
 Primary DEM: {self.profile_data['dem1_name']}
 
@@ -1006,7 +1238,18 @@ Offset Distance: {self.spin_distance.value():.2f} m
             profile1_dem2 = self.profile_data['profile1_dem2']
             profile2_dem2 = self.profile_data['profile2_dem2']
             
-            stats_text += f"""
+            if single_mode or profile2_dem2 is None:
+                stats_text += f"""
+━━━━━━━━━━━━━━━━━━
+Comparison DEM: {self.profile_data['dem2_name']}
+
+Profile:
+  Min: {np.nanmin(profile1_dem2['elevations']):.3f} m
+  Max: {np.nanmax(profile1_dem2['elevations']):.3f} m
+  Mean: {np.nanmean(profile1_dem2['elevations']):.3f} m
+"""
+            else:
+                stats_text += f"""
 ━━━━━━━━━━━━━━━━━━
 Comparison DEM: {self.profile_data['dem2_name']}
 
@@ -1021,8 +1264,8 @@ Profile B-B':
   Mean: {np.nanmean(profile2_dem2['elevations']):.3f} m
 
 DEM Difference (Primary - Comparison):
-  A-A': {np.nanmean(profile1['elevations'] - profile1_dem2['elevations']):.3f} m
-  B-B': {np.nanmean(profile2['elevations'] - profile2_dem2['elevations']):.3f} m
+  A-A': {np.nanmean(profile1['elevations'] - profile1_dem2['elevations']) if profile1_dem2 is not None else 0:.3f} m
+  B-B': {np.nanmean(profile2['elevations'] - profile2_dem2['elevations']) if profile2_dem2 is not None else 0:.3f} m
 """
         
         self.info_text.setText(stats_text)
@@ -1121,6 +1364,7 @@ DEM Difference (Primary - Comparison):
         self.export_vector_btn.setEnabled(enabled)
         self.export_png_btn.setEnabled(enabled)
         self.layer_action.setEnabled(enabled)
+        self.ai_report_action.setEnabled(enabled)
         
     def clear_profiles(self):
         """Clear current profiles"""
@@ -1150,6 +1394,12 @@ DEM Difference (Primary - Comparison):
     def create_section_layer(self):
         """Create vector layer with section lines"""
         if not self.profile_data:
+            return
+            
+        # Check if this is multi-section data
+        if self.profile_data.get('multi_section'):
+            # Create multi-section layer
+            self.create_multi_section_layer()
             return
             
         self.section_count += 1
@@ -1186,18 +1436,24 @@ DEM Difference (Primary - Comparison):
         # Add features
         section_layer.startEditing()
         
-        # Add line A-A'
-        feature1 = QgsFeature()
-        feature1.setGeometry(QgsGeometry.fromPolylineXY(self.profile_data['line1']))
-        feature1.setAttributes([
-            self.section_count * 2 - 1,
-            f"A{self.section_count}-A'{self.section_count}",
-            "Upper",
-            self.section_count,  # section_group
-            self.profile_data.get('dem1_name', 'DEM'),  # dem_name
-            ""  # notes
-        ])
-        section_layer.addFeature(feature1)
+        # Check if we have line data
+        if 'line1' in self.profile_data:
+            # Add line A-A'
+            feature1 = QgsFeature()
+            line1 = self.profile_data['line1']
+            if isinstance(line1, QgsGeometry):
+                feature1.setGeometry(line1)
+            else:
+                feature1.setGeometry(QgsGeometry.fromPolylineXY(line1))
+            feature1.setAttributes([
+                self.section_count * 2 - 1,
+                f"A{self.section_count}-A'{self.section_count}",
+                "Upper",
+                self.section_count,  # section_group
+                self.profile_data.get('dem1_name', 'DEM'),  # dem_name
+                ""  # notes
+            ])
+            section_layer.addFeature(feature1)
         
         # Add line B-B'
         feature2 = QgsFeature()
@@ -1266,29 +1522,44 @@ DEM Difference (Primary - Comparison):
         
         # Add profile A-A'
         feature1 = QgsFeature()
-        feature1.setGeometry(QgsGeometry.fromPolylineXY(self.profile_data['line1']))
+        
+        # Handle different line formats
+        line1 = self.profile_data['line1']
+        if isinstance(line1, QgsGeometry):
+            feature1.setGeometry(line1)
+        else:
+            feature1.setGeometry(QgsGeometry.fromPolylineXY(line1))
+            
         feature1.setAttributes([
             self.section_count * 2 - 1,
-            f"A{self.section_count}-A'{self.section_count}",
-            "Upper",
+            f"A{self.section_count}-A'{self.section_count}" if not self.profile_data.get('single_mode') else f"Section {self.section_count}",
+            "Upper" if not self.profile_data.get('single_mode') else "Profile",
             dem_name,
             float(np.nanmin(profile1['elevations'])),
             float(np.nanmax(profile1['elevations']))
         ])
         layer.addFeature(feature1)
         
-        # Add profile B-B'
-        feature2 = QgsFeature()
-        feature2.setGeometry(QgsGeometry.fromPolylineXY(self.profile_data['line2']))
-        feature2.setAttributes([
-            self.section_count * 2,
-            f"B{self.section_count}-B'{self.section_count}",
-            "Lower",
-            dem_name,
-            float(np.nanmin(profile2['elevations'])),
-            float(np.nanmax(profile2['elevations']))
-        ])
-        layer.addFeature(feature2)
+        # Add profile B-B' only if in dual mode
+        if not self.profile_data.get('single_mode') and self.profile_data['line2'] is not None:
+            feature2 = QgsFeature()
+            
+            # Handle different line formats
+            line2 = self.profile_data['line2']
+            if isinstance(line2, QgsGeometry):
+                feature2.setGeometry(line2)
+            else:
+                feature2.setGeometry(QgsGeometry.fromPolylineXY(line2))
+                
+            feature2.setAttributes([
+                self.section_count * 2,
+                f"B{self.section_count}-B'{self.section_count}",
+                "Lower",
+                dem_name,
+                float(np.nanmin(profile2['elevations'])),
+                float(np.nanmax(profile2['elevations']))
+            ])
+            layer.addFeature(feature2)
         
         layer.commitChanges()
         
@@ -1358,6 +1629,87 @@ DEM Difference (Primary - Comparison):
         layer.setLabelsEnabled(True)
         
         layer.triggerRepaint()
+    
+    def create_multi_section_layer(self):
+        """Create layer for multi-section polygon data"""
+        try:
+            sections_data = self.profile_data.get('sections', [])
+            if not sections_data:
+                return
+                
+            # Create layer
+            layer_name = f"Polygon_Sections_{len(sections_data)}_sides"
+            crs = QgsProject.instance().crs()
+            layer = QgsVectorLayer(
+                f"LineString?crs={crs.authid()}&field=id:integer&field=name:string&field=side:integer&field=length:double&field=min_elev:double&field=max_elev:double",
+                layer_name,
+                "memory"
+            )
+            
+            layer.startEditing()
+            
+            # Add each section
+            for idx, section in enumerate(sections_data):
+                feature = QgsFeature()
+                feature.setGeometry(section['line_geometry'])
+                feature.setAttributes([
+                    idx + 1,
+                    section['section_name'],
+                    idx + 1,
+                    float(section['total_distance']),
+                    float(np.nanmin(section['elevations'])),
+                    float(np.nanmax(section['elevations']))
+                ])
+                layer.addFeature(feature)
+            
+            layer.commitChanges()
+            
+            # Apply symbology
+            self.setup_multi_section_symbology(layer)
+            
+            # Add to project
+            QgsProject.instance().addMapLayer(layer)
+            
+            self.iface.messageBar().pushMessage(
+                "Success", 
+                f"Created polygon section layer with {len(sections_data)} sections",
+                level=Qgis.Success,
+                duration=3
+            )
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error creating multi-section layer: {str(e)}", 
+                                   'DualProfileViewer', Qgis.Critical)
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to create section layer: {str(e)}",
+                level=Qgis.Critical,
+                duration=5
+            )
+    
+    def setup_multi_section_symbology(self, layer):
+        """Setup symbology for multi-section layer"""
+        # Create categorized renderer by side
+        categories = []
+        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan']
+        
+        # Get unique sides
+        unique_sides = set()
+        for feature in layer.getFeatures():
+            unique_sides.add(feature['side'])
+        
+        for side in sorted(unique_sides):
+            symbol = QgsSymbol.defaultSymbol(layer.geometryType())
+            symbol_layer = symbol.symbolLayer(0)
+            symbol_layer.setColor(QColor(colors[(side - 1) % len(colors)]))
+            symbol_layer.setWidth(2)
+            
+            category = QgsRendererCategory(side, symbol, f"Side {side}")
+            categories.append(category)
+        
+        renderer = QgsCategorizedSymbolRenderer('side', categories)
+        layer.setRenderer(renderer)
+        layer.triggerRepaint()
         
     def export_csv(self):
         """Export profiles as CSV"""
@@ -1374,6 +1726,11 @@ DEM Difference (Primary - Comparison):
         if filename:
             try:
                 import csv
+                
+                # Check if this is multi-section data
+                if self.profile_data.get('multi_section', False):
+                    self.export_multi_section_csv(filename)
+                    return
                 
                 with open(filename, 'w', newline='') as csvfile:
                     writer = csv.writer(csvfile)
@@ -1474,11 +1831,57 @@ DEM Difference (Primary - Comparison):
                     
     def export_png(self):
         """Export plot as PNG"""
-        # This would need to be implemented based on the plotting library used
-        QtWidgets.QMessageBox.information(
-            self, "Export PNG",
-            "PNG export functionality to be implemented"
+        if not self.profile_data:
+            QtWidgets.QMessageBox.warning(self, "Warning", "No profile data to export")
+            return
+            
+        # Get output file path
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export Plot as Image",
+            f"profile_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            "PNG Files (*.png);;JPEG Files (*.jpg *.jpeg);;All Files (*.*)"
         )
+        
+        if not filename:
+            return
+            
+        try:
+            # Check if we're using matplotlib or plotly
+            if self.use_web_action.isChecked() and PLOTLY_AVAILABLE:
+                # Export from Plotly
+                fig = self.create_plotly_figure()
+                if fig:
+                    # Try to use kaleido if available, otherwise use matplotlib
+                    try:
+                        fig.write_image(filename)
+                        QtWidgets.QMessageBox.information(self, "Success", f"Plot exported to {filename}")
+                    except Exception as e:
+                        # Fall back to matplotlib
+                        self.export_with_matplotlib(filename)
+            else:
+                # Export from matplotlib
+                self.export_with_matplotlib(filename)
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Export Error", f"Failed to export image: {str(e)}")
+    
+    def export_with_matplotlib(self, filename):
+        """Export using matplotlib"""
+        if MATPLOTLIB_AVAILABLE and self.figure:
+            # Ensure we have the latest plot
+            self.plot_with_matplotlib()
+            
+            # Save figure
+            self.figure.savefig(filename, dpi=300, bbox_inches='tight')
+            QtWidgets.QMessageBox.information(self, "Success", f"Plot exported to {filename}")
+        else:
+            # Use the plot generator utility
+            from .plot_generator import PlotGenerator
+            success = PlotGenerator.generate_profile_plot(self.profile_data, filename)
+            if success:
+                QtWidgets.QMessageBox.information(self, "Success", f"Plot exported to {filename}")
+            else:
+                QtWidgets.QMessageBox.warning(self, "Warning", "Failed to generate plot")
         
     def open_3d_viewer(self):
         """Open 3D viewer"""
@@ -1494,28 +1897,38 @@ DEM Difference (Primary - Comparison):
                 from .geological_3d_viewer import GeologicalSectionViewer
                 geo_viewer = GeologicalSectionViewer(parent=self)
                 
-                # Pass all profile data including multi-DEM
-                if self.profile_data_list:
-                    # Include additional profiles if available
-                    all_profiles = self.profile_data_list.copy()
-                    
-                    # Add additional DEM profiles
-                    if 'additional_profiles' in self.profile_data:
-                        for dem_name, profiles in self.profile_data['additional_profiles'].items():
-                            all_profiles.append(profiles['profile1'])
-                            all_profiles.append(profiles['profile2'])
-                    
-                    geo_viewer.load_sections(all_profiles)
+                # Check if we have multi-section data from polygon
+                if hasattr(self, 'profile_data') and self.profile_data and self.profile_data.get('multi_section'):
+                    # Pass multi-section data
+                    geo_viewer.profile_data = self.profile_data
+                    geo_viewer.handle_multi_section_data(self.profile_data)
+                else:
+                    # Pass all profile data including multi-DEM
+                    if self.profile_data_list:
+                        # Include additional profiles if available
+                        all_profiles = self.profile_data_list.copy()
+                        
+                        # Add additional DEM profiles
+                        if 'additional_profiles' in self.profile_data:
+                            for dem_name, profiles in self.profile_data['additional_profiles'].items():
+                                all_profiles.append(profiles['profile1'])
+                                if profiles.get('profile2') is not None:
+                                    all_profiles.append(profiles['profile2'])
+                        
+                        geo_viewer.load_sections(all_profiles)
                 
                 geo_viewer.show()
                 geo_viewer.exec_()
         elif item == 'Geological Section View (Plotly)':
             # Plotly geological view
-            from .plotly_geological_viewer import PlotlyGeologicalViewer
-            plotly_viewer = PlotlyGeologicalViewer(parent=self)
-            plotly_viewer.set_profile_data(self.profile_data)
-            plotly_viewer.show()
-            plotly_viewer.exec_()
+            try:
+                from .plotly_geological_viewer import PlotlyGeologicalViewer
+                plotly_viewer = PlotlyGeologicalViewer(parent=self)
+                if self.profile_data:
+                    plotly_viewer.set_profile_data(self.profile_data)
+                plotly_viewer.exec_()
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Failed to open Plotly viewer: {str(e)}")
             
     def show_help(self):
         """Show help"""
@@ -1547,6 +1960,32 @@ DEM Difference (Primary - Comparison):
         from .layout_generator import LayoutGenerator
         from .plot_generator import PlotGenerator
         
+        # Check if this is multi-section polygon data
+        if hasattr(self, 'profile_data') and self.profile_data and self.profile_data.get('multi_section'):
+            # Handle multi-section layout
+            from .multi_section_layout import MultiSectionLayoutGenerator
+            
+            # Generate multi-section plot
+            plot_image = os.path.join(tempfile.gettempdir(), 'multi_section_plot.png')
+            MultiSectionLayoutGenerator.generate_multi_section_plot(
+                self.profile_data['sections'], 
+                self.profile_data.get('dem1_name', 'DEM')
+            )
+            
+            # Create layout with multi-section data
+            generator = LayoutGenerator(self.iface)
+            layout = generator.create_profile_layout(
+                self.profile_data,
+                plot_image_path=plot_image
+            )
+            
+            if layout:
+                # Open layout designer
+                designer = self.iface.openLayoutDesigner(layout)
+                QtWidgets.QMessageBox.information(self, "Layout Created", 
+                    f"Multi-section layout created with {len(self.profile_data['sections'])} polygon sections")
+            return
+            
         # If we have stored sections, generate plots for all of them
         if self.all_sections:
             for section in self.all_sections:
@@ -1648,6 +2087,178 @@ DEM Difference (Primary - Comparison):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to open in browser: {str(e)}")
         
+    def extract_polygon_profiles(self):
+        """Extract profiles for all polygon sections"""
+        try:
+            from .multi_section_handler import MultiSectionHandler
+            
+            dem_layer_id = self.combo_dem.currentData()
+            if not dem_layer_id:
+                return
+                
+            dem_layer = QgsProject.instance().mapLayer(dem_layer_id)
+            if not dem_layer:
+                return
+                
+            num_samples = self.spin_samples.value()
+            
+            # Process all sections
+            self.multi_sections_data = MultiSectionHandler.process_polygon_sections(
+                self.polygon_data_full, dem_layer, self.multi_dem_widget, num_samples
+            )
+            
+            # Store for visualization
+            self.profile_data = {
+                'multi_section': True,
+                'sections': self.multi_sections_data,
+                'dem1_name': dem_layer.name(),
+                'polygon': self.polygon_data_full['polygon'],
+                'section_count': len(self.multi_sections_data)
+            }
+            
+            # Visualize
+            self.plot_multi_section_profiles()
+            
+            # Update statistics
+            self.update_multi_section_statistics()
+            
+            # Enable export buttons
+            self.enable_export_buttons(True)
+            
+            # Enable 3D viewer
+            self.view3d_action.setEnabled(True)
+            
+            # Enable layout generator
+            self.layout_action.setEnabled(True)
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to extract polygon profiles: {str(e)}")
+            
+    def plot_multi_section_profiles(self):
+        """Plot multiple section profiles"""
+        try:
+            from .multi_section_handler import MultiSectionHandler
+            
+            # Enable browser button
+            self.open_browser_action.setEnabled(True)
+            
+            # Check which view is active
+            if self.use_web_action.isChecked() and PLOTLY_AVAILABLE:
+                # Use Plotly
+                fig = MultiSectionHandler.create_multi_section_plots(
+                    self.multi_sections_data, use_plotly=True
+                )
+                if fig:
+                    # Display in web view
+                    html = fig.to_html(include_plotlyjs='cdn')
+                    if self.web_view:
+                        self.web_view.setHtml(html)
+            else:
+                # Use matplotlib
+                if MATPLOTLIB_AVAILABLE and self.figure:
+                    self.figure.clear()
+                    fig = MultiSectionHandler.create_matplotlib_multi_section(
+                        self.multi_sections_data
+                    )
+                    if fig:
+                        self.canvas.draw()
+                        
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Plot Error", f"Failed to create plots: {str(e)}")
+            
+    def update_multi_section_statistics(self):
+        """Update statistics for multiple sections"""
+        try:
+            from .multi_section_handler import MultiSectionHandler
+            
+            stats = MultiSectionHandler.calculate_multi_section_statistics(
+                self.multi_sections_data
+            )
+            
+            stats_text = MultiSectionHandler.format_statistics_text(stats)
+            
+            # Update info text
+            self.info_text.setPlainText(stats_text)
+            
+            # Store stats for layout
+            self.section_statistics = stats
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Stats Error", f"Failed to calculate statistics: {str(e)}")
+    
+    def export_multi_section_csv(self, filename):
+        """Export multi-section data to CSV"""
+        try:
+            import csv
+            
+            with open(filename, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write metadata
+                writer.writerow(['# Multi-Section Profile Data'])
+                writer.writerow(['# DEM:', self.profile_data.get('dem1_name', 'Unknown')])
+                writer.writerow(['# Sections:', len(self.multi_sections_data)])
+                writer.writerow([])
+                
+                # Write each section
+                for idx, section in enumerate(self.multi_sections_data):
+                    writer.writerow([f'# Section {idx + 1}: {section["section_name"]}'])
+                    writer.writerow(['Distance_m', 'Elevation_m', 'X', 'Y'])
+                    
+                    # Write data points
+                    for i in range(len(section['distances'])):
+                        # Calculate X, Y positions
+                        ratio = section['distances'][i] / section['total_distance'] if section['total_distance'] > 0 else 0
+                        x = section['start'].x() + ratio * (section['end'].x() - section['start'].x())
+                        y = section['start'].y() + ratio * (section['end'].y() - section['start'].y())
+                        
+                        writer.writerow([
+                            f"{section['distances'][i]:.2f}",
+                            f"{section['elevations'][i]:.3f}",
+                            f"{x:.6f}",
+                            f"{y:.6f}"
+                        ])
+                    
+                    writer.writerow([])  # Empty row between sections
+                
+            QtWidgets.QMessageBox.information(self, "Success", f"Multi-section data exported to {filename}")
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {str(e)}")
+    
     def get_all_profile_data(self):
         """Get all profile data for 3D viewer"""
         return self.profile_data_list
+    
+    def on_offset_changed(self, value):
+        """Handle offset distance change"""
+        # Update the current drawing tool if active
+        if hasattr(self, 'map_tool') and self.map_tool and hasattr(self.map_tool, 'offset_distance'):
+            self.map_tool.offset_distance = value
+        if hasattr(self, 'current_tool') and self.current_tool and hasattr(self.current_tool, 'offset_distance'):
+            self.current_tool.offset_distance = value
+    
+    def generate_ai_report(self):
+        """Open AI report generator"""
+        try:
+            from .ai_report_generator import AIReportGenerator
+            
+            if not self.profile_data:
+                QtWidgets.QMessageBox.warning(self, "Warning", "No profile data available for report generation")
+                return
+                
+            # Open AI report dialog
+            ai_dialog = AIReportGenerator(self.profile_data, parent=self)
+            ai_dialog.exec_()
+            
+        except ImportError:
+            QtWidgets.QMessageBox.information(self, "AI Report Generator", 
+                "AI Report Generator requires additional dependencies.\n\n"
+                "To use this feature, install:\n"
+                "- requests: pip install requests\n\n"
+                "For full functionality, you'll also need an API key from:\n"
+                "- OpenAI (GPT-4): https://openai.com/api/\n"
+                "- Anthropic (Claude): https://www.anthropic.com/api/"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to open AI report generator: {str(e)}")

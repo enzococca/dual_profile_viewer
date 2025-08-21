@@ -11,11 +11,13 @@ from qgis.PyQt.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                                 QGroupBox, QFormLayout, QComboBox,
                                 QCheckBox, QSpinBox, QDoubleSpinBox,
                                 QTableWidget, QTableWidgetItem,
-                                QColorDialog, QInputDialog, QFileDialog)
+                                QColorDialog, QInputDialog, QFileDialog,
+                                QMessageBox)
 from qgis.core import (QgsMessageLog, Qgis, QgsProject, QgsVectorLayer,
                       QgsRasterLayer, QgsPointXY)
 from qgis.PyQt import QtWidgets
 import numpy as np
+from datetime import datetime
 
 try:
     import pyvista as pv
@@ -123,6 +125,12 @@ class GeologicalSectionViewer(QDialog):
         self.show_intersections_cb.toggled.connect(self.toggle_intersections)
         section_layout.addRow(self.show_intersections_cb)
         
+        # Show all sections
+        self.show_all_sections_cb = QCheckBox("Show All Sections")
+        self.show_all_sections_cb.setChecked(True)
+        self.show_all_sections_cb.toggled.connect(self.update_display)
+        section_layout.addRow(self.show_all_sections_cb)
+        
         section_group.setLayout(section_layout)
         control_layout.addWidget(section_group)
         
@@ -226,10 +234,15 @@ class GeologicalSectionViewer(QDialog):
         view_group.setLayout(view_layout)
         control_layout.addWidget(view_group)
         
-        # Export button
-        export_btn = QPushButton("Export 3D Model")
-        export_btn.clicked.connect(self.export_3d)
-        control_layout.addWidget(export_btn)
+        # Export buttons
+        export_layout = QHBoxLayout()
+        export_3d_btn = QPushButton("Export 3D Model")
+        export_3d_btn.clicked.connect(self.export_3d)
+        export_image_btn = QPushButton("Export Image")
+        export_image_btn.clicked.connect(self.export_image)
+        export_layout.addWidget(export_3d_btn)
+        export_layout.addWidget(export_image_btn)
+        control_layout.addLayout(export_layout)
         
         control_layout.addStretch()
         control_widget.setLayout(control_layout)
@@ -269,7 +282,13 @@ class GeologicalSectionViewer(QDialog):
         self.walls = []
         self.wall_actors = []  # Store actors for later manipulation
         
-        for idx, section in enumerate(self.sections):
+        # Show all sections if checkbox is checked
+        if hasattr(self, 'show_all_sections_cb') and self.show_all_sections_cb.isChecked():
+            sections_to_show = self.sections
+        else:
+            sections_to_show = self.sections[:1] if self.sections else []
+        
+        for idx, section in enumerate(sections_to_show):
             result = self.create_wall_mesh(section, idx)
             if result and result[0] is not None:
                 wall_mesh, wall_actor = result
@@ -441,6 +460,11 @@ class GeologicalSectionViewer(QDialog):
         """Toggle intersection visualization"""
         self.create_geological_walls()
         
+    def update_display(self):
+        """Update the display based on current settings"""
+        if self.sections:
+            self.create_geological_walls()
+        
     def toggle_reference_plane(self, checked):
         """Toggle reference plane visibility"""
         if checked:
@@ -551,6 +575,22 @@ class GeologicalSectionViewer(QDialog):
             color_item.setBackground(QColor(color))
             self.layer_table.setItem(i, 3, color_item)
     
+    def export_image(self):
+        """Export view as image"""
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export Image",
+            f"geological_view_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            "PNG Files (*.png);;JPEG Files (*.jpg *.jpeg);;All Files (*.*)"
+        )
+        
+        if filename:
+            try:
+                # Take screenshot of the plotter
+                self.plotter.screenshot(filename)
+                QMessageBox.information(self, "Success", f"Image exported to {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export image: {str(e)}")
+    
     def export_3d(self):
         """Export 3D model"""
         filename, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -572,6 +612,40 @@ class GeologicalSectionViewer(QDialog):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Error", 
                                               f"Failed to export: {str(e)}")
+    
+    def handle_multi_section_data(self, profile_data):
+        """Handle multi-section data from polygon drawing"""
+        try:
+            from .multi_section_3d_viewer import MultiSection3DViewer
+            
+            sections_data = profile_data.get('sections', [])
+            if sections_data:
+                # Use multi-section viewer
+                MultiSection3DViewer.add_polygon_sections_to_viewer(
+                    self, sections_data, 
+                    show_intersections=self.show_intersections_cb.isChecked()
+                )
+                
+                # Update info
+                self.info_label.setText(f"Loaded {len(sections_data)} polygon sections")
+                
+                # Update table with section info
+                self.update_section_table_multi(sections_data)
+                
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error handling multi-section data: {str(e)}", 
+                                   'DualProfileViewer', Qgis.Critical)
+            QMessageBox.critical(self, "Error", f"Failed to load polygon sections: {str(e)}")
+    
+    def update_section_table_multi(self, sections_data):
+        """Update section table for multi-section data"""
+        self.layer_table.setRowCount(len(sections_data))
+        
+        for idx, section in enumerate(sections_data):
+            self.layer_table.setItem(idx, 0, QTableWidgetItem(str(idx + 1)))
+            self.layer_table.setItem(idx, 1, QTableWidgetItem(section['section_name']))
+            self.layer_table.setItem(idx, 2, QTableWidgetItem(f"Side {idx + 1}"))
+            self.layer_table.setItem(idx, 3, QTableWidgetItem("Polygon Section"))
     
     def refresh_section_layers(self):
         """Refresh the list of available section layers"""

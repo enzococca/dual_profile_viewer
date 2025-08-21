@@ -36,7 +36,11 @@ class PlotlyGeologicalViewer(QDialog):
         self.sections = []
         self.section_layers = []  # Layers from QGIS TOC
         
-        self.setup_ui()
+        try:
+            self.setup_ui()
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error initializing Plotly viewer: {str(e)}", 'DualProfileViewer', Qgis.Critical)
+            QMessageBox.critical(self, "Initialization Error", f"Failed to initialize viewer: {str(e)}")
         
     def setup_ui(self):
         """Create the user interface"""
@@ -169,16 +173,30 @@ class PlotlyGeologicalViewer(QDialog):
         """Create visualization from current profile data"""
         fig = go.Figure()
         
-        # Get settings
-        thickness = self.thickness_slider.value()
-        exag = self.exag_slider.value() / 10.0
-        
-        if self.show_walls_cb.isChecked():
-            # Create 3D walls
-            self.add_wall_to_figure(fig, self.profile_data, thickness, exag)
+        # Check if we have valid profile data
+        if not self.profile_data or 'line1' not in self.profile_data:
+            # Create simple demo visualization if no data
+            x = [0, 100, 200, 300]
+            y = [0, 0, 0, 0]
+            z = [100, 120, 110, 115]
+            
+            fig.add_trace(go.Scatter3d(
+                x=x, y=y, z=z,
+                mode='lines+markers',
+                name='Demo Profile',
+                line=dict(color='red', width=4)
+            ))
         else:
-            # Create simple 3D lines
-            self.add_lines_to_figure(fig, self.profile_data, exag)
+            # Get settings
+            thickness = self.thickness_slider.value()
+            exag = self.exag_slider.value() / 10.0
+            
+            if self.show_walls_cb.isChecked():
+                # Create 3D walls
+                self.add_wall_to_figure(fig, self.profile_data, thickness, exag)
+            else:
+                # Create simple 3D lines
+                self.add_lines_to_figure(fig, self.profile_data, exag)
             
         # Configure layout
         fig.update_layout(
@@ -285,7 +303,7 @@ class PlotlyGeologicalViewer(QDialog):
             ))
             
             # Add comparison DEMs as different colored layers
-            if self.show_layers_cb.isChecked() and 'profile1_dem2' in profile_data:
+            if self.show_layers_cb.isChecked() and 'profile1_dem2' in profile_data and profile_data.get('profile1_dem2') is not None:
                 self.add_comparison_layers(fig, profile_data, line1, line2, exag)
                 
             # Add intersection markers if multiple walls

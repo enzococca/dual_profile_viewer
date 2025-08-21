@@ -15,9 +15,19 @@ from qgis.gui import QgsMapTool, QgsMapToolEmitPoint, QgsRubberBand
 import math
 
 class PolygonProfileTool(QgsMapTool):
-    """Map tool for drawing polygon sections with width"""
+    """Map tool for drawing polygon sections with width
     
-    profile_created = pyqtSignal(object)  # Emits polygon geometry
+    This tool allows three modes of section creation:
+    1. Rectangle: Draw a single rectangular section by clicking two points
+       - Creates one section profile with specified width
+    2. Polygon: Draw a polygon by clicking multiple points (right-click to finish)
+       - Creates multiple sections, one for each side of the polygon
+       - Each section has the specified width
+    3. Freehand: Draw a freehand line that gets buffered to create a section
+       - Creates a curved section with specified width
+    """
+    
+    profile_created = pyqtSignal(object)  # Emits polygon geometry and section data
     
     def __init__(self, canvas, iface):
         super().__init__(canvas)
@@ -178,18 +188,37 @@ class PolygonProfileTool(QgsMapTool):
             self.reset()
             
     def finish_polygon(self):
-        """Finish polygon drawing"""
+        """Finish polygon drawing and create sections from each side"""
         if len(self.points) >= 3:
             # Create polygon
             polygon = QgsGeometry.fromPolygonXY([self.points])
             
-            # Calculate center line (simplified - connects first and last point)
-            center_line = QgsGeometry.fromPolylineXY([self.points[0], self.points[-1]])
+            # Create sections from each polygon side
+            sections = []
+            for i in range(len(self.points)):
+                # Get current and next point (wrapping around)
+                p1 = self.points[i]
+                p2 = self.points[(i + 1) % len(self.points)]
+                
+                # Create section line
+                section_line = QgsGeometry.fromPolylineXY([p1, p2])
+                
+                # Create section polygon with width
+                section_points = self.create_rectangle_points(p1, p2)
+                section_polygon = QgsGeometry.fromPolygonXY([section_points])
+                
+                sections.append({
+                    'line': section_line,
+                    'polygon': section_polygon,
+                    'start': p1,
+                    'end': p2,
+                    'width': self.width
+                })
             
             self.profile_created.emit({
                 'polygon': polygon,
-                'center_line': center_line,
-                'width': None,  # Variable width
+                'sections': sections,
+                'width': self.width,
                 'type': 'polygon'
             })
             

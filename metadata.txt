@@ -1,23 +1,59 @@
 [general]
 name=Dual Profile Viewer
-qgisMinimumVersion=3.0
-description=Archaeological dual profile analysis tool with georeferenced vector export
-version=1.0.0
+qgisMinimumVersion=3.16
+description=Advanced elevation profile analysis with single/dual modes, multi-section polygons, 3D visualization, and AI reports
+version=2.0.0
 author=Enzo Cocca
 email=enzo.ccc@gmail.com
 
-about=Creates parallel elevation profiles from DEM/DTM data for archaeological analysis. Features include: dual parallel profiles with adjustable offset, interactive Plotly graphs, multi-DEM comparison, export profiles as georeferenced vectors (polylines/polygons), CSV data export, PNG export with world files, automatic section labeling, and real-time profile visualization. Perfect for analyzing walls, structures, excavations, and terrain features.
+about=Comprehensive elevation profile analysis tool featuring single and dual profile modes, polygon multi-section support, advanced 3D visualization with PyVista and Plotly, multi-DEM comparison, professional layout generation, AI-powered report generation with GPT-4/Claude integration, and extensive export options. Perfect for archaeological analysis, geological studies, engineering projects, and environmental research.
 
 tracker=https://github.com/enzococca/dual_profile_viewer/issues
 repository=https://github.com/enzococca/dual_profile_viewer
-tags=archaeology,profile,dem,dtm,elevation,analysis,vector,export
+tags=archaeology,profile,dem,dtm,elevation,analysis,3d,visualization,ai,report,polygon,multi-section
 homepage=https://github.com/enzococca/dual_profile_viewer
 category=Raster
 icon=icon.png
 experimental=False
 deprecated=False
 
-changelog=1.0.0
+changelog=2.0.0
+    Major Features:
+    - Added single section mode for individual profiles
+    - Implemented polygon multi-section functionality (one profile per polygon side)
+    - Integrated PyVista for advanced 3D terrain visualization
+    - Added Plotly web-based 3D viewer as alternative
+    - Implemented AI report generation (GPT-4/Claude)
+    - Redesigned layout system with one page per section
+    - Added adaptive scale bars for layouts
+    
+    Improvements:
+    - Enhanced multi-DEM comparison capabilities
+    - Improved vector export with multi-section support
+    - Added real-time profile preview during drawing
+    - Implemented proper single section symbology
+    - Enhanced statistics with per-section analysis
+    - Added intersection visualization in 3D viewer
+    - Improved memory management and performance
+    
+    Bug Fixes:
+    - Fixed TypeError with None profile2 in single mode
+    - Fixed geometry type checking errors
+    - Fixed Plotly viewer not opening issue
+    - Fixed offset not updating after drawing started
+    - Fixed DEM sampling returning constant values
+    - Fixed numpy boolean operations
+    - Fixed vector export for multi-section data
+    - Fixed f-string syntax errors in layout generation
+    - Fixed single section symbology (now uses single symbol)
+    
+    Technical Updates:
+    - Updated minimum QGIS version to 3.16
+    - Improved error handling and user feedback
+    - Added comprehensive documentation
+    - Cleaned up codebase and removed test files
+
+    1.0.0
     - Initial release
     - Dual profile extraction from DEM/DTM
     - Interactive Plotly visualization

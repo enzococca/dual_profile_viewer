@@ -28,7 +28,7 @@ class LayoutGenerator:
         self.iface = iface
         self.layout = None
         
-    def create_profile_layout(self, profile_data, plot_image_path=None, view_3d_image_path=None, all_sections=None, ai_report_text=None):
+    def create_profile_layout(self, profile_data, plot_image_path=None, view_3d_image_path=None, all_sections=None, ai_report_text=None, perpendicular_sections=None):
         """Create a professional layout with all profile data"""
         
         # Create new print layout
@@ -54,7 +54,8 @@ class LayoutGenerator:
             sections_to_show = [{
                 'profile_data': profile_data,
                 'plot_image': plot_image_path,
-                'section_number': 1
+                'section_number': 1,
+                'is_perpendicular': False
             }]
         
         # Create one page per section
@@ -71,6 +72,30 @@ class LayoutGenerator:
             
             # Add section content
             self.create_section_page_new(section, page_number=idx)
+        
+        # Add perpendicular sections if available
+        if perpendicular_sections:
+            for idx, perp_section in enumerate(perpendicular_sections):
+                # Add new page for each perpendicular section
+                page = QgsLayoutItemPage(self.layout)
+                self.layout.pageCollection().addPage(page)
+                page.setPageSize('A3', QgsLayoutItemPage.Landscape)
+                
+                # Create section data for perpendicular
+                perp_data = {
+                    'profile_data': {
+                        'dem1_name': profile_data.get('dem1_name', 'DEM'),
+                        'profile1': perp_section.get('profile', {}),
+                        'single_mode': True,
+                        'line1': QgsGeometry.fromPolylineXY([perp_section['start'], perp_section['end']])
+                    },
+                    'plot_image': perp_section.get('plot_image', None),  # Use the saved plot image
+                    'section_number': len(sections_to_show) + idx + 1,
+                    'is_perpendicular': True,
+                    'perpendicular_index': idx + 1
+                }
+                
+                self.create_section_page_new(perp_data, page_number=len(sections_to_show) + idx)
         
         # Add AI report page if available
         if ai_report_text:
@@ -437,9 +462,12 @@ Analysis by: Dual Profile Viewer Plugin"""
         
         # Title
         title = QgsLayoutItemLabel(self.layout)
-        title_text = f"SECTION {section_num} ANALYSIS"
-        if profile_data.get('single_mode'):
-            title_text += " - SINGLE PROFILE"
+        if section_data.get('is_perpendicular', False):
+            title_text = f"PERPENDICULAR SECTION {section_data.get('perpendicular_index', section_num)}"
+        else:
+            title_text = f"SECTION {section_num} ANALYSIS"
+            if profile_data.get('single_mode'):
+                title_text += " - SINGLE PROFILE"
         title.setText(title_text)
         title.setFont(QFont('Arial', 18, QFont.Bold))
         title.attemptMove(QgsLayoutPoint(20, 20 + y_offset, QgsUnitTypes.LayoutMillimeters))

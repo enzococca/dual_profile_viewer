@@ -6,10 +6,10 @@ Combines all functionality from the original dialog in a compact tabbed interfac
 
 from qgis.PyQt import QtWidgets, QtCore
 from qgis.PyQt.QtGui import QColor, QFont, QIcon
-from qgis.PyQt.QtCore import Qt, QUrl, pyqtSignal
+from qgis.PyQt.QtCore import Qt, QUrl, pyqtSignal, QTimer, QThread
 from qgis.PyQt.QtWidgets import (QTabWidget, QVBoxLayout, QHBoxLayout, 
                                 QWidget, QSplitter, QGroupBox, QToolButton,
-                                QSizePolicy, QFormLayout, QLabel)
+                                QSizePolicy, QFormLayout, QLabel, QApplication)
 
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry,
@@ -23,11 +23,13 @@ from qgis.core import (
     QgsCategorizedSymbolRenderer, QgsRendererCategory,
     QgsTextFormat, QgsVectorLayerSimpleLabeling,
     QgsPalLayerSettings, QgsTextBufferSettings,
-    Qgis, QgsMessageLog
+    Qgis, QgsMessageLog, QgsLayerTreeGroup
 )
 from qgis.gui import QgsMapTool, QgsRubberBand, QgsMapToolEmitPoint
 
 import math
+# from .interactive_section_marker import InteractiveSectionMarker, GraphInteractionHandler
+from .interactive_marker_simple import InteractiveMarkerController
 import numpy as np
 from datetime import datetime
 import os
@@ -42,6 +44,131 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 import webbrowser
+
+
+class PerpendicularLayerWorker(QThread):
+    """Worker thread for creating perpendicular section layers"""
+    progress = pyqtSignal(int, str)
+    message = pyqtSignal(str, int, int)  # message, level, duration
+    error = pyqtSignal(str)
+    finished = pyqtSignal()
+    
+    def __init__(self, perpendicular_sections, iface):
+        super().__init__()
+        self.perpendicular_sections = perpendicular_sections
+        self.iface = iface
+        self.is_canceled = False
+        
+    def cancel(self):
+        """Cancel the operation"""
+        self.is_canceled = True
+        
+    def run(self):
+        """Run the layer creation process"""
+        try:
+            total_steps = len(self.perpendicular_sections) + 5
+            current_step = 0
+            
+            # Create or get perpendicular sections layer
+            self.progress.emit(int(current_step / total_steps * 100), "Creating layer...")
+            
+            layer_name = "Perpendicular_Sections"
+            layers = QgsProject.instance().mapLayersByName(layer_name)
+            
+            if layers:
+                perp_layer = layers[0]
+            else:
+                # Create new layer
+                crs = QgsProject.instance().crs()
+                perp_layer = QgsVectorLayer(
+                    f"LineString?crs={crs.authid()}&field=section_id:integer&field=type:string&field=length:double&field=angle:double",
+                    layer_name,
+                    "memory"
+                )
+                
+                if not perp_layer.isValid():
+                    self.error.emit("Failed to create perpendicular layer")
+                    return
+            
+            current_step += 1
+            self.progress.emit(int(current_step / total_steps * 100), "Creating features...")
+            
+            # Add features for each perpendicular section
+            features = []
+            for i, perp_data in enumerate(self.perpendicular_sections):
+                if self.is_canceled:
+                    return
+                    
+                feature = QgsFeature()
+                
+                # Create line geometry
+                line = QgsGeometry.fromPolylineXY([perp_data['start'], perp_data['end']])
+                feature.setGeometry(line)
+                
+                # Set attributes
+                feature.setAttributes([
+                    i + 1,  # section_id
+                    "perpendicular",  # type
+                    perp_data['length'],  # length
+                    math.degrees(perp_data['angle'])  # angle in degrees
+                ])
+                
+                features.append(feature)
+                
+                current_step += 1
+                self.progress.emit(
+                    int(current_step / total_steps * 100), 
+                    f"Creating feature {i+1} of {len(self.perpendicular_sections)}..."
+                )
+                
+                # Small delay to keep UI responsive
+                self.msleep(10)
+            
+            if self.is_canceled:
+                return
+                
+            # Add features to layer
+            self.progress.emit(int(current_step / total_steps * 100), "Adding features to layer...")
+            success = perp_layer.dataProvider().addFeatures(features)
+            
+            current_step += 1
+            self.progress.emit(int(current_step / total_steps * 100), "Applying symbology...")
+            
+            # Apply symbology
+            symbol = QgsSymbol.defaultSymbol(perp_layer.geometryType())
+            symbol.setColor(QColor(0, 255, 0))  # Green color
+            symbol.setWidth(1.5)
+            
+            renderer = QgsSingleSymbolRenderer(symbol)
+            perp_layer.setRenderer(renderer)
+            
+            current_step += 1
+            self.progress.emit(int(current_step / total_steps * 100), "Adding layer to project...")
+            
+            # Add to project if new
+            if layer_name not in [l.name() for l in QgsProject.instance().mapLayers().values()]:
+                QgsProject.instance().addMapLayer(perp_layer)
+            
+            current_step += 1
+            self.progress.emit(int(current_step / total_steps * 100), "Refreshing display...")
+            
+            # Trigger repaint
+            perp_layer.triggerRepaint()
+            
+            # Done
+            self.message.emit(
+                f"Created {len(self.perpendicular_sections)} perpendicular sections in layer '{layer_name}'",
+                Qgis.Success,
+                3
+            )
+            
+        except Exception as e:
+            import traceback
+            QgsMessageLog.logMessage(f"Error in worker: {str(e)}\n{traceback.format_exc()}", 
+                                   "DualProfileViewer", Qgis.Critical)
+            self.error.emit(str(e))
+        finally:
+            self.finished.emit()
 
 # Import supporting modules
 from .profile_exporter import ProfileExporter
@@ -94,6 +221,10 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         
         # Store all sections data for layout
         self.all_sections = []  # List of all section data with plots
+        
+        # Interactive marker controller
+        self.marker_controller = InteractiveMarkerController(self.iface.mapCanvas(), self)
+        self.perpendicular_sections = []  # Store perpendicular sections
         
         self.setup_ui()
         
@@ -172,11 +303,24 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         # Matplotlib view
         if MATPLOTLIB_AVAILABLE:
             from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
             from matplotlib.figure import Figure
+            
+            # Create matplotlib widget with toolbar
+            self.matplotlib_widget = QWidget()
+            matplotlib_layout = QVBoxLayout(self.matplotlib_widget)
+            matplotlib_layout.setContentsMargins(0, 0, 0, 0)
+            
             self.figure = Figure(figsize=(8, 6))
             self.canvas = FigureCanvas(self.figure)
             self.canvas.setMinimumHeight(300)
-            self.plot_stack.addWidget(self.canvas)
+            
+            # Add navigation toolbar
+            self.matplotlib_toolbar = NavigationToolbar(self.canvas, self.matplotlib_widget)
+            matplotlib_layout.addWidget(self.matplotlib_toolbar)
+            matplotlib_layout.addWidget(self.canvas)
+            
+            self.plot_stack.addWidget(self.matplotlib_widget)
         else:
             # Fallback text view
             self.canvas = QtWidgets.QTextEdit()
@@ -189,7 +333,10 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         if self.web_view:
             self.plot_stack.setCurrentWidget(self.web_view)
         else:
-            self.plot_stack.setCurrentWidget(self.canvas)
+            if MATPLOTLIB_AVAILABLE:
+                self.plot_stack.setCurrentWidget(self.matplotlib_widget)
+            else:
+                self.plot_stack.setCurrentWidget(self.canvas)
             self.use_web_action.setChecked(False)
         
         plot_layout.addWidget(self.plot_stack)
@@ -587,53 +734,90 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         
     def create_profiles(self):
         """Create profiles from drawn lines"""
-        if hasattr(self, 'multi_section_mode') and self.multi_section_mode and hasattr(self, 'polygon_data_full'):
-            # Handle multiple sections from polygon
-            self.extract_polygon_profiles()
-        elif self.lines_drawn:
-            line1, line2, center_line = self.lines_drawn
-            self.extract_profiles(line1, line2, center_line)
-        else:
-            QtWidgets.QMessageBox.warning(self, "Warning", "No lines drawn yet. Please draw sections first.")
+        try:
+            QgsMessageLog.logMessage("Starting create_profiles", "DualProfileViewer", Qgis.Info)
+            
+            # Disable interactive marker during profile creation
+            if hasattr(self, 'marker_controller'):
+                QgsMessageLog.logMessage("Disabling marker controller for profile creation", "DualProfileViewer", Qgis.Info)
+                self.marker_controller.set_enabled(False)
+            
+            if hasattr(self, 'multi_section_mode') and self.multi_section_mode and hasattr(self, 'polygon_data_full'):
+                # Handle multiple sections from polygon
+                QgsMessageLog.logMessage("Extracting polygon profiles", "DualProfileViewer", Qgis.Info)
+                self.extract_polygon_profiles()
+            elif self.lines_drawn:
+                line1, line2, center_line = self.lines_drawn
+                QgsMessageLog.logMessage("Extracting line profiles", "DualProfileViewer", Qgis.Info)
+                self.extract_profiles(line1, line2, center_line)
+            else:
+                QtWidgets.QMessageBox.warning(self, "Warning", "No lines drawn yet. Please draw sections first.")
+                
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in create_profiles: {str(e)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to create profiles: {str(e)}")
+        finally:
+            # Re-enable marker controller after a delay to avoid conflicts
+            if hasattr(self, 'marker_controller'):
+                QgsMessageLog.logMessage("Scheduling marker controller re-enable", "DualProfileViewer", Qgis.Info)
+                QTimer.singleShot(500, lambda: self.marker_controller.set_enabled(True))
             
     def extract_profiles(self, line1, line2, center_line):
         """Extract elevation profiles along lines"""
-        dem_layer_id = self.combo_dem.currentData()
-        if not dem_layer_id:
-            return
+        try:
+            QgsMessageLog.logMessage("Starting extract_profiles", "DualProfileViewer", Qgis.Info)
             
-        dem_layer = QgsProject.instance().mapLayer(dem_layer_id)
-        if not dem_layer:
-            return
+            dem_layer_id = self.combo_dem.currentData()
+            if not dem_layer_id:
+                QgsMessageLog.logMessage("No DEM layer selected", "DualProfileViewer", Qgis.Warning)
+                return
+                
+            dem_layer = QgsProject.instance().mapLayer(dem_layer_id)
+            if not dem_layer:
+                QgsMessageLog.logMessage("DEM layer not found", "DualProfileViewer", Qgis.Warning)
+                return
+                
+            num_samples = self.spin_samples.value()
+            QgsMessageLog.logMessage(f"Extracting profiles with {num_samples} samples", "DualProfileViewer", Qgis.Info)
             
-        num_samples = self.spin_samples.value()
-        
-        # Handle single line mode
-        single_mode = line2 is None
-        
-        # Sample along lines
-        if isinstance(line1, QgsGeometry):
-            # Single line mode - extract points from geometry
-            points = line1.asPolyline()
-            if len(points) >= 2:
+            # Handle single line mode
+            single_mode = line2 is None
+            
+            # Sample along lines
+            if isinstance(line1, QgsGeometry):
+                # Single line mode - extract points from geometry
+                points = line1.asPolyline()
+                if len(points) >= 2:
+                    QgsMessageLog.logMessage("Sampling profile 1 (single mode)", "DualProfileViewer", Qgis.Info)
+                    profile1 = self.sample_raster_along_line(
+                        dem_layer, points[0], points[1], num_samples
+                    )
+                else:
+                    QgsMessageLog.logMessage("Not enough points in line geometry", "DualProfileViewer", Qgis.Warning)
+                    return
+            else:
+                # Dual line mode - line1 is a tuple of points
+                QgsMessageLog.logMessage("Sampling profile 1 (dual mode)", "DualProfileViewer", Qgis.Info)
                 profile1 = self.sample_raster_along_line(
-                    dem_layer, points[0], points[1], num_samples
+                    dem_layer, line1[0], line1[1], num_samples
+                )
+            
+            # Only extract second profile if in dual mode
+            if not single_mode:
+                QgsMessageLog.logMessage("Sampling profile 2", "DualProfileViewer", Qgis.Info)
+                profile2 = self.sample_raster_along_line(
+                    dem_layer, line2[0], line2[1], num_samples
                 )
             else:
-                return
-        else:
-            # Dual line mode - line1 is a tuple of points
-            profile1 = self.sample_raster_along_line(
-                dem_layer, line1[0], line1[1], num_samples
-            )
-        
-        # Only extract second profile if in dual mode
-        if not single_mode:
-            profile2 = self.sample_raster_along_line(
-                dem_layer, line2[0], line2[1], num_samples
-            )
-        else:
-            profile2 = None
+                profile2 = None
+                
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in extract_profiles: {str(e)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            raise
         
         # Initialize variables for multi-DEM
         profile1_dem2 = None
@@ -708,7 +892,14 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
             self.profile_data_list.extend([profile1_dem2, profile2_dem2])
         
         # Visualize
-        self.plot_profiles()
+        QgsMessageLog.logMessage("Calling plot_profiles", "DualProfileViewer", Qgis.Info)
+        try:
+            self.plot_profiles()
+        except Exception as plot_error:
+            QgsMessageLog.logMessage(f"Error in plot_profiles: {str(plot_error)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            raise
         
         # Store this section data for layout (will store plot after visualization)
         section_data = {
@@ -771,19 +962,41 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
         
     def plot_profiles(self):
         """Create and display plots"""
-        # Enable browser button
-        self.open_browser_action.setEnabled(True)
-        
-        # Check which view is active
-        if self.use_web_action.isChecked() and self.web_view:
-            # Use Plotly web view
-            if PLOTLY_AVAILABLE:
-                self.plot_with_plotly()
+        try:
+            QgsMessageLog.logMessage("Starting plot_profiles", "DualProfileViewer", Qgis.Info)
+            
+            # Enable browser button
+            self.open_browser_action.setEnabled(True)
+            
+            # Check which view is active
+            if self.use_web_action.isChecked() and self.web_view:
+                # Use Plotly web view
+                QgsMessageLog.logMessage("Using web view for plotting", "DualProfileViewer", Qgis.Info)
+                if PLOTLY_AVAILABLE:
+                    self.plot_with_plotly()
+                else:
+                    self.plot_with_matplotlib()
             else:
+                # Use matplotlib
+                QgsMessageLog.logMessage("Using matplotlib for plotting", "DualProfileViewer", Qgis.Info)
                 self.plot_with_matplotlib()
-        else:
-            # Use matplotlib
-            self.plot_with_matplotlib()
+                
+            QgsMessageLog.logMessage("plot_profiles completed", "DualProfileViewer", Qgis.Info)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in plot_profiles: {str(e)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            raise
+            
+        # Setup interactive marker after plot creation (only if not already setup)
+        if not hasattr(self, 'marker_controller') or not self.marker_controller.marker:
+            try:
+                QgsMessageLog.logMessage("Setting up interactive marker", "DualProfileViewer", Qgis.Info)
+                self.setup_interactive_marker()
+            except Exception as e:
+                QgsMessageLog.logMessage(f"Failed to setup interactive marker: {str(e)}", 
+                                       "DualProfileViewer", Qgis.Warning)
     
     def create_plotly_figure(self):
         """Create plotly figure from profile data"""
@@ -1056,114 +1269,200 @@ class CompactDualProfileViewer(QtWidgets.QWidget):
     
     def plot_with_matplotlib(self):
         """Plot using matplotlib"""
-        if not self.profile_data:
-            return
+        try:
+            QgsMessageLog.logMessage("Starting plot_with_matplotlib", "DualProfileViewer", Qgis.Info)
             
-        if not MATPLOTLIB_AVAILABLE or not self.figure:
-            # Use text fallback
-            self.update_fallback_plot()
-            return
-            
-        # Clear figure
-        self.figure.clear()
-        
-        # Check if this is multi-section data
-        if self.profile_data.get('multi_section', False):
-            # Use multi-section plotting
-            self.plot_multi_section_profiles()
-            return
-        
-        # Check if single mode
-        single_mode = self.profile_data.get('single_mode', False)
-        profile1 = self.profile_data['profile1']
-        profile2 = self.profile_data['profile2']
-        
-        if single_mode or profile2 is None:
-            # Single profile plot
-            ax = self.figure.add_subplot(1, 1, 1)
-            
-            ax.plot(profile1['distances'], profile1['elevations'], 
-                     'r-', linewidth=2, label=f"Profile ({self.profile_data['dem1_name']})")
-                     
-            # Plot comparison DEMs if available
-            if self.profile_data['profile1_dem2'] is not None:
-                profile1_dem2 = self.profile_data['profile1_dem2']
-                ax.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
-                         'orange', linewidth=2, linestyle='--', 
-                         label=f"Profile ({self.profile_data['dem2_name']})")
-                         
-            # Plot additional DEMs
-            if 'additional_profiles' in self.profile_data:
-                colors = ['purple', 'brown', 'pink', 'gray', 'olive']
-                color_idx = 0
-                for dem_name, profiles in self.profile_data['additional_profiles'].items():
-                    if profiles['profile1'] is not None:
-                        color = colors[color_idx % len(colors)]
-                        ax.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
-                                 color=color, linewidth=2, linestyle=':',
-                                 label=f"Profile ({dem_name})")
-                        color_idx += 1
-                        
-            ax.set_xlabel('Distance (m)')
-            ax.set_ylabel('Elevation (m)')
-            ax.set_title('Elevation Profile')
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            
-        else:
-            # Dual profile plot
-            ax1 = self.figure.add_subplot(2, 1, 1)
-            ax2 = self.figure.add_subplot(2, 1, 2, sharex=ax1)
-            
-            ax1.plot(profile1['distances'], profile1['elevations'], 
-                     'r-', linewidth=2, label=f"A-A' ({self.profile_data['dem1_name']})")
-            ax2.plot(profile2['distances'], profile2['elevations'], 
-                     'b-', linewidth=2, label=f"B-B' ({self.profile_data['dem1_name']})")
-        
-            # Plot comparison DEMs if available
-            if self.profile_data['profile1_dem2'] is not None:
-                profile1_dem2 = self.profile_data['profile1_dem2']
-                profile2_dem2 = self.profile_data['profile2_dem2']
+            if not self.profile_data:
+                QgsMessageLog.logMessage("No profile data available", "DualProfileViewer", Qgis.Warning)
+                return
                 
-                ax1.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
-                         'orange', linewidth=2, linestyle='--', 
-                         label=f"A-A' ({self.profile_data['dem2_name']})")
-                if profile2_dem2 is not None:
-                    ax2.plot(profile2_dem2['distances'], profile2_dem2['elevations'], 
+            if not MATPLOTLIB_AVAILABLE or not self.figure:
+                # Use text fallback
+                QgsMessageLog.logMessage("Matplotlib not available, using fallback", "DualProfileViewer", Qgis.Info)
+                self.update_fallback_plot()
+                return
+                
+            # Clear figure
+            QgsMessageLog.logMessage("Clearing matplotlib figure", "DualProfileViewer", Qgis.Info)
+            self.figure.clear()
+            
+            # Check if this is multi-section data
+            if self.profile_data.get('multi_section', False):
+                # Use multi-section plotting
+                QgsMessageLog.logMessage("Using multi-section plotting", "DualProfileViewer", Qgis.Info)
+                self.plot_multi_section_profiles()
+                return
+            
+            # Check if single mode
+            single_mode = self.profile_data.get('single_mode', False)
+            profile1 = self.profile_data['profile1']
+            profile2 = self.profile_data['profile2']
+            
+            QgsMessageLog.logMessage(f"Single mode: {single_mode}", "DualProfileViewer", Qgis.Info)
+            
+            if single_mode or profile2 is None:
+                # Single profile plot
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                ax.plot(profile1['distances'], profile1['elevations'], 
+                         'r-', linewidth=2, label=f"Profile ({self.profile_data['dem1_name']})")
+                         
+                # Plot comparison DEMs if available
+                if self.profile_data['profile1_dem2'] is not None:
+                    profile1_dem2 = self.profile_data['profile1_dem2']
+                    ax.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
+                             'orange', linewidth=2, linestyle='--', 
+                             label=f"Profile ({self.profile_data['dem2_name']})")
+                             
+                # Plot additional DEMs
+                if 'additional_profiles' in self.profile_data:
+                    colors = ['purple', 'brown', 'pink', 'gray', 'olive']
+                    color_idx = 0
+                    for dem_name, profiles in self.profile_data['additional_profiles'].items():
+                        if profiles['profile1'] is not None:
+                            color = colors[color_idx % len(colors)]
+                            ax.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
+                                     color=color, linewidth=2, linestyle=':',
+                                     label=f"Profile ({dem_name})")
+                            color_idx += 1
+                            
+                ax.set_xlabel('Distance (m)')
+                ax.set_ylabel('Elevation (m)')
+                ax.set_title('Elevation Profile')
+                ax.grid(True, alpha=0.3)
+                ax.legend()
+                
+            else:
+                # Dual profile plot
+                ax1 = self.figure.add_subplot(2, 1, 1)
+                ax2 = self.figure.add_subplot(2, 1, 2, sharex=ax1)
+                
+                ax1.plot(profile1['distances'], profile1['elevations'], 
+                         'r-', linewidth=2, label=f"A-A' ({self.profile_data['dem1_name']})")
+                ax2.plot(profile2['distances'], profile2['elevations'], 
+                         'b-', linewidth=2, label=f"B-B' ({self.profile_data['dem1_name']})")
+            
+                # Plot comparison DEMs if available
+                if self.profile_data['profile1_dem2'] is not None:
+                    profile1_dem2 = self.profile_data['profile1_dem2']
+                    profile2_dem2 = self.profile_data['profile2_dem2']
+                    
+                    ax1.plot(profile1_dem2['distances'], profile1_dem2['elevations'], 
+                             'orange', linewidth=2, linestyle='--', 
+                             label=f"A-A' ({self.profile_data['dem2_name']})")
+                    if profile2_dem2 is not None:
+                        ax2.plot(profile2_dem2['distances'], profile2_dem2['elevations'], 
                              'green', linewidth=2, linestyle='--', 
                              label=f"B-B' ({self.profile_data['dem2_name']})")
-        
-            # Plot additional DEMs
-            if 'additional_profiles' in self.profile_data:
-                colors = ['purple', 'brown', 'pink', 'gray', 'olive']
-                color_idx = 0
-                for dem_name, profiles in self.profile_data['additional_profiles'].items():
-                    color = colors[color_idx % len(colors)]
-                    
-                    if profiles['profile1'] is not None:
-                        ax1.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
-                                 color=color, linewidth=2, linestyle=':',
-                                 label=f"A-A' ({dem_name})")
-                    if profiles['profile2'] is not None:
-                        ax2.plot(profiles['profile2']['distances'], profiles['profile2']['elevations'],
-                                 color=color, linewidth=2, linestyle=':',
-                                 label=f"B-B' ({dem_name})")
-                    color_idx += 1
+                
+                # Plot additional DEMs
+                if 'additional_profiles' in self.profile_data:
+                    colors = ['purple', 'brown', 'pink', 'gray', 'olive']
+                    color_idx = 0
+                    for dem_name, profiles in self.profile_data['additional_profiles'].items():
+                        color = colors[color_idx % len(colors)]
+                        
+                        if profiles['profile1'] is not None:
+                            ax1.plot(profiles['profile1']['distances'], profiles['profile1']['elevations'],
+                                     color=color, linewidth=2, linestyle=':',
+                                     label=f"A-A' ({dem_name})")
+                        if profiles['profile2'] is not None:
+                            ax2.plot(profiles['profile2']['distances'], profiles['profile2']['elevations'],
+                                     color=color, linewidth=2, linestyle=':',
+                                     label=f"B-B' ({dem_name})")
+                        color_idx += 1
+                
+                # Format axes
+                ax1.set_ylabel('Elevation (m)')
+                ax1.set_title('Profile A-A\'')
+                ax1.grid(True, alpha=0.3)
+                ax1.legend()
+                
+                ax2.set_xlabel('Distance (m)')
+                ax2.set_ylabel('Elevation (m)')
+                ax2.set_title('Profile B-B\'')
+                ax2.grid(True, alpha=0.3)
+                ax2.legend()
             
-            # Format axes
-            ax1.set_ylabel('Elevation (m)')
-            ax1.set_title('Profile A-A\'')
-            ax1.grid(True, alpha=0.3)
-            ax1.legend()
+            self.figure.tight_layout()
             
-            ax2.set_xlabel('Distance (m)')
-            ax2.set_ylabel('Elevation (m)')
-            ax2.set_title('Profile B-B\'')
-            ax2.grid(True, alpha=0.3)
-            ax2.legend()
-        
-        self.figure.tight_layout()
-        self.canvas.draw()
+            # Add vertical lines for perpendicular sections on main profile only
+            if hasattr(self, 'perpendicular_sections') and self.perpendicular_sections:
+                QgsMessageLog.logMessage(f"Adding {len(self.perpendicular_sections)} perpendicular markers to main profile", "DualProfileViewer", Qgis.Info)
+                
+                # Get the main profile axes (only the first one for single mode, or ax1 for dual mode)
+                if single_mode or profile2 is None:
+                    main_ax = ax
+                else:
+                    main_ax = ax1  # Only add to the first profile
+                
+                # Add vertical lines at perpendicular intersection points
+                try:
+                    # Get the main section line
+                    if 'line1' in self.profile_data:
+                        main_line = self.profile_data['line1']
+                        if isinstance(main_line, list):
+                            main_line = QgsGeometry.fromPolylineXY(main_line)
+                        
+                        for i, perp in enumerate(self.perpendicular_sections):
+                            # Find intersection point with main line
+                            center_point = perp['center']
+                            
+                            QgsMessageLog.logMessage(f"Processing perpendicular {i+1} at {center_point}", 
+                                                   "DualProfileViewer", Qgis.Info)
+                            
+                            # Calculate distance along main line
+                            # Use closest point on line to find position
+                            result = main_line.closestSegmentWithContext(center_point)
+                            if result[0] >= 0:  # Valid result
+                                # Get the closest point on the line
+                                closest_point = result[1]
+                                
+                                # Calculate distance from start of line to closest point
+                                # We need to calculate the distance along the line, not the direct distance
+                                length = main_line.length()
+                                best_distance = 0
+                                min_point_dist = float('inf')
+                                
+                                # More precise sampling
+                                for j in range(201):  # Increased sampling for better accuracy
+                                    pos = j / 200.0
+                                    dist = length * pos
+                                    test_point = main_line.interpolate(dist)
+                                    if test_point and not test_point.isEmpty():
+                                        test_point_xy = test_point.asPoint()
+                                        # Compare with the closest point we found
+                                        d = test_point_xy.distance(closest_point)
+                                        if d < min_point_dist:
+                                            min_point_dist = d
+                                            best_distance = dist
+                                
+                                QgsMessageLog.logMessage(f"Perpendicular {i+1} at distance: {best_distance:.2f}m", 
+                                                       "DualProfileViewer", Qgis.Info)
+                                
+                                # Add vertical line at this distance
+                                line = main_ax.axvline(x=best_distance, color='green', 
+                                              linestyle='--', alpha=0.7, linewidth=2,
+                                              label=f'Perp {i+1}' if i == 0 else '')
+                                line._is_perpendicular_marker = True  # Mark for identification
+                                
+                except Exception as e:
+                    QgsMessageLog.logMessage(f"Error adding perpendicular markers: {str(e)}", 
+                                           "DualProfileViewer", Qgis.Warning)
+            
+            self.figure.tight_layout()
+            
+            # Use draw_idle to avoid blocking
+            QgsMessageLog.logMessage("Drawing matplotlib canvas", "DualProfileViewer", Qgis.Info)
+            self.canvas.draw_idle()
+            
+            QgsMessageLog.logMessage("plot_with_matplotlib completed successfully", "DualProfileViewer", Qgis.Info)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in plot_with_matplotlib: {str(e)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            raise
         
     def update_statistics(self):
         """Update statistics in info tab"""
@@ -1374,6 +1673,9 @@ DEM Difference (Primary - Comparison):
         self.all_sections = []  # Clear all stored sections
         self.section_count = 0  # Reset section count
         
+        # Clear interactive elements
+        self.clear_interactive_elements()
+        
         # Reset UI
         self.enable_export_buttons(False)
         self.view3d_action.setEnabled(False)
@@ -1393,27 +1695,67 @@ DEM Difference (Primary - Comparison):
             
     def create_section_layer(self):
         """Create vector layer with section lines"""
-        if not self.profile_data:
-            return
+        try:
+            QgsMessageLog.logMessage("Starting create_section_layer", "DualProfileViewer", Qgis.Info)
             
-        # Check if this is multi-section data
-        if self.profile_data.get('multi_section'):
-            # Create multi-section layer
-            self.create_multi_section_layer()
-            return
+            # Disable marker controller during layer creation
+            if hasattr(self, 'marker_controller'):
+                QgsMessageLog.logMessage("Disabling marker controller for layer creation", "DualProfileViewer", Qgis.Info)
+                self.marker_controller.set_enabled(False)
             
-        self.section_count += 1
-        
-        # Check if we have multiple DEMs
-        has_multi_dem = (self.profile_data.get('profile1_dem2') is not None or 
-                        'additional_profiles' in self.profile_data)
-        
-        if has_multi_dem:
-            # Create separate files for each DEM
-            self.create_multi_dem_layers()
-        else:
-            # Create single layer
-            self.create_single_section_layer()
+            if not self.profile_data:
+                QgsMessageLog.logMessage("No profile data available", "DualProfileViewer", Qgis.Warning)
+                # Check if we only have perpendicular sections
+                if hasattr(self, 'perpendicular_sections') and self.perpendicular_sections:
+                    QgsMessageLog.logMessage("Only perpendicular sections available, creating those", "DualProfileViewer", Qgis.Info)
+                    self.create_perpendicular_section_layers()
+                return
+                
+            # Check if this is multi-section data
+            if self.profile_data.get('multi_section'):
+                # Create multi-section layer
+                QgsMessageLog.logMessage("Creating multi-section layer", "DualProfileViewer", Qgis.Info)
+                self.create_multi_section_layer()
+                return
+                
+            self.section_count += 1
+            
+            # Check if we have multiple DEMs
+            has_multi_dem = (self.profile_data.get('profile1_dem2') is not None or 
+                            'additional_profiles' in self.profile_data)
+            
+            if has_multi_dem:
+                # Create separate files for each DEM
+                QgsMessageLog.logMessage("Creating multi-DEM layers", "DualProfileViewer", Qgis.Info)
+                self.create_multi_dem_layers()
+            else:
+                # Create single layer
+                QgsMessageLog.logMessage("Creating single section layer", "DualProfileViewer", Qgis.Info)
+                self.create_single_section_layer()
+                
+            # Also create perpendicular sections if any
+            if hasattr(self, 'perpendicular_sections') and self.perpendicular_sections:
+                QgsMessageLog.logMessage(f"Creating {len(self.perpendicular_sections)} perpendicular sections", "DualProfileViewer", Qgis.Info)
+                try:
+                    # Use QTimer to defer creation slightly to avoid UI blocking
+                    QTimer.singleShot(100, self.create_perpendicular_section_layers)
+                except Exception as perp_error:
+                    QgsMessageLog.logMessage(f"Error creating perpendicular layers: {str(perp_error)}", "DualProfileViewer", Qgis.Critical)
+                    import traceback
+                    QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+                
+            QgsMessageLog.logMessage("create_section_layer completed", "DualProfileViewer", Qgis.Info)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in create_section_layer: {str(e)}", "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to create layer: {str(e)}")
+        finally:
+            # Re-enable marker controller after a delay to avoid conflicts
+            if hasattr(self, 'marker_controller'):
+                QgsMessageLog.logMessage("Scheduling marker controller re-enable", "DualProfileViewer", Qgis.Info)
+                QTimer.singleShot(500, lambda: self.marker_controller.set_enabled(True))
     
     def create_single_section_layer(self):
         """Create a single layer for sections"""
@@ -1585,8 +1927,12 @@ DEM Difference (Primary - Comparison):
         # Group layers if possible
         root = QgsProject.instance().layerTreeRoot()
         group_name = f"Profile_Sections_{self.section_count}"
-        group = root.findGroup(group_name)
-        if not group:
+        
+        # Check if group already exists to avoid duplicates
+        existing_groups = [g for g in root.children() if isinstance(g, QgsLayerTreeGroup) and g.name() == group_name]
+        if existing_groups:
+            group = existing_groups[0]
+        else:
             group = root.insertGroup(0, group_name)
         
         # Move layer to group
@@ -1835,7 +2181,7 @@ DEM Difference (Primary - Comparison):
                 
     def export_vector_profile(self):
         """Export profile as georeferenced vector"""
-        if not self.profile_data:
+        if not self.profile_data and not (hasattr(self, 'perpendicular_sections') and self.perpendicular_sections):
             QtWidgets.QMessageBox.warning(self, "Warning", 
                                          "No profile data to export!")
             return
@@ -1855,19 +2201,61 @@ DEM Difference (Primary - Comparison):
             
             if filename:
                 try:
-                    layer = ProfileExporter.export_profile_as_vector(
-                        self.profile_data,
-                        filename,
-                        export_type=options['type'],
-                        scale_factor=options['scale'],
-                        vertical_exaggeration=options['vertical_exag'],
-                        baseline_offset=options['baseline_offset'],
-                        add_to_map=options['add_to_map']
-                    )
+                    # Export main profile
+                    if self.profile_data:
+                        layer = ProfileExporter.export_profile_as_vector(
+                            self.profile_data,
+                            filename,
+                            export_type=options['type'],
+                            scale_factor=options['scale'],
+                            vertical_exaggeration=options['vertical_exag'],
+                            baseline_offset=options['baseline_offset'],
+                            add_to_map=options['add_to_map']
+                        )
+                    
+                    # Export perpendicular sections if any
+                    if hasattr(self, 'perpendicular_sections') and self.perpendicular_sections:
+                        # Modify filename for perpendicular sections
+                        base_name = filename.rsplit('.', 1)[0]
+                        ext = filename.rsplit('.', 1)[1]
+                        perp_filename = f"{base_name}_perpendicular.{ext}"
+                        
+                        # Export each perpendicular section
+                        for i, perp in enumerate(self.perpendicular_sections):
+                            if 'profile' in perp:
+                                # Create profile data for perpendicular section
+                                perp_profile_data = {
+                                    'profile1': perp['profile'],
+                                    'profile2': None,
+                                    'single_mode': True,
+                                    'line1': QgsGeometry.fromPolylineXY([perp['start'], perp['end']]),
+                                    'dem1_name': self.profile_data.get('dem1_name', 'DEM') if self.profile_data else 'DEM'
+                                }
+                                
+                                # Use section-specific filename for multiple perpendiculars
+                                if len(self.perpendicular_sections) > 1:
+                                    section_filename = f"{base_name}_perpendicular_{i+1}.{ext}"
+                                else:
+                                    section_filename = perp_filename
+                                
+                                layer = ProfileExporter.export_profile_as_vector(
+                                    perp_profile_data,
+                                    section_filename,
+                                    export_type=options['type'],
+                                    scale_factor=options['scale'],
+                                    vertical_exaggeration=options['vertical_exag'],
+                                    baseline_offset=options['baseline_offset'],
+                                    add_to_map=options['add_to_map']
+                                )
+                    
+                    # Prepare success message
+                    msg = f"Profile exported to:\n{filename}"
+                    if hasattr(self, 'perpendicular_sections') and self.perpendicular_sections:
+                        msg += f"\n\nAlso exported {len(self.perpendicular_sections)} perpendicular section(s)"
                     
                     QtWidgets.QMessageBox.information(
                         self, "Success",
-                        f"Profile exported to:\n{filename}"
+                        msg
                     )
                     
                 except Exception as e:
@@ -2023,7 +2411,8 @@ DEM Difference (Primary - Comparison):
             generator = LayoutGenerator(self.iface)
             layout = generator.create_profile_layout(
                 self.profile_data,
-                plot_image_path=plot_image
+                plot_image_path=plot_image,
+                perpendicular_sections=self.perpendicular_sections if hasattr(self, 'perpendicular_sections') else None
             )
             
             if layout:
@@ -2082,7 +2471,8 @@ DEM Difference (Primary - Comparison):
             self.profile_data or (self.all_sections[0]['profile_data'] if self.all_sections else {}),
             plot_image_path=plot_image,
             all_sections=self.all_sections if len(self.all_sections) > 0 else None,
-            ai_report_text=ai_report_text
+            ai_report_text=ai_report_text,
+            perpendicular_sections=self.perpendicular_sections if hasattr(self, 'perpendicular_sections') else None
         )
         
         if layout:
@@ -2102,7 +2492,14 @@ DEM Difference (Primary - Comparison):
         if checked and self.web_view:
             self.plot_stack.setCurrentWidget(self.web_view)
         else:
-            self.plot_stack.setCurrentWidget(self.canvas)
+            if MATPLOTLIB_AVAILABLE and hasattr(self, 'matplotlib_widget'):
+                # Check if we have tabs or just the matplotlib widget
+                if hasattr(self, 'plot_tabs') and self.plot_tabs.parent() == self.plot_stack:
+                    self.plot_stack.setCurrentWidget(self.plot_tabs)
+                else:
+                    self.plot_stack.setCurrentWidget(self.matplotlib_widget)
+            else:
+                self.plot_stack.setCurrentWidget(self.canvas)
         
         # Refresh plot if we have data
         if self.profile_data:
@@ -2350,3 +2747,472 @@ DEM Difference (Primary - Comparison):
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to open AI report generator: {str(e)}")
+    
+    def setup_interactive_marker(self):
+        """Setup interactive marker on section line"""
+        if not self.profile_data or 'line1' not in self.profile_data:
+            return
+            
+        try:
+            # Create marker controller if needed
+            if not hasattr(self, 'marker_controller'):
+                QgsMessageLog.logMessage("Creating marker controller", "DualProfileViewer", Qgis.Info)
+                self.marker_controller = InteractiveMarkerController(self.iface.mapCanvas(), self)
+            
+            # Get section line geometry
+            line_geom = self.profile_data.get('line1')
+            if not line_geom:
+                return
+                
+            # Create marker using controller
+            marker = self.marker_controller.create_marker(line_geom)
+            
+            # Connect signals
+            marker.signals.position_changed.connect(self.on_marker_position_changed)
+            marker.signals.perpendicular_requested.connect(self.create_perpendicular_section)
+            
+            # Show marker
+            marker.set_visible(True)
+            
+            # Force canvas refresh
+            self.iface.mapCanvas().refresh()
+            
+            # Show message to user
+            self.iface.statusBarIface().showMessage(
+                "Interactive marker active: Drag red marker or hold X + right-click for perpendicular section", 
+                5000
+            )
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in setup_interactive_marker: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Warning)
+        
+    def on_marker_position_changed(self, normalized_pos):
+        """Handle marker position change from map"""
+        # Update position info in status
+        if self.profile_data:
+            total_distance = self.profile_data['profile1']['distances'][-1]
+            current_distance = total_distance * normalized_pos
+            
+            # Find elevation at this position
+            distances = np.array(self.profile_data['profile1']['distances'])
+            idx = np.searchsorted(distances, current_distance)
+            if idx < len(distances):
+                elevation = self.profile_data['profile1']['elevations'][idx]
+                self.iface.statusBarIface().showMessage(
+                    f"Distance: {current_distance:.1f}m, Elevation: {elevation:.1f}m", 
+                    3000
+                )
+                
+                # Update matplotlib plot with vertical line
+                if MATPLOTLIB_AVAILABLE and self.figure and not self.use_web_action.isChecked():
+                    try:
+                        # Clear previous marker line
+                        for ax in self.figure.axes:
+                            # Remove previous marker lines
+                            for line in ax.lines[:]:
+                                if hasattr(line, '_is_marker') and line._is_marker:
+                                    line.remove()
+                            
+                            # Add new marker line
+                            marker_line = ax.axvline(x=current_distance, color='red', 
+                                                   linestyle='--', alpha=0.7, linewidth=2)
+                            marker_line._is_marker = True
+                            
+                        self.canvas.draw_idle()
+                    except Exception as e:
+                        QgsMessageLog.logMessage(f"Error updating matplotlib marker: {str(e)}", 
+                                               "DualProfileViewer", Qgis.Warning)
+                
+    def create_perpendicular_section(self, point, angle, length):
+        """Create a new perpendicular section"""
+        try:
+            QgsMessageLog.logMessage(f"Creating perpendicular section at {point}, angle: {angle}, length: {length}", 
+                                   "DualProfileViewer", Qgis.Info)
+            
+            # Ensure we have the required attributes
+            if not hasattr(self, 'perpendicular_sections'):
+                self.perpendicular_sections = []
+            
+            # Calculate perpendicular line endpoints
+            half_length = length / 2
+            dx = math.cos(angle) * half_length
+            dy = math.sin(angle) * half_length
+            
+            start_point = QgsPointXY(point.x() - dx, point.y() - dy)
+            end_point = QgsPointXY(point.x() + dx, point.y() + dy)
+            
+            # Store perpendicular section data
+            perp_data = {
+                'start': start_point,
+                'end': end_point,
+                'center': point,
+                'length': length,
+                'angle': angle
+            }
+            
+            # Extract profile for perpendicular section
+            dem_layer_id = self.combo_dem.currentData()
+            if dem_layer_id:
+                dem_layer = QgsProject.instance().mapLayer(dem_layer_id)
+                if dem_layer:
+                    num_samples = self.spin_samples.value()
+                    
+                    QgsMessageLog.logMessage("Extracting perpendicular profile...", "DualProfileViewer", Qgis.Info)
+                    
+                    # Extract profile with error handling
+                    try:
+                        perp_profile = self.sample_raster_along_line(
+                            dem_layer, start_point, end_point, num_samples
+                        )
+                        perp_data['profile'] = perp_profile
+                        
+                        # Add to list only if profile extraction succeeded
+                        self.perpendicular_sections.append(perp_data)
+                        
+                        # Add visual indicator on map
+                        self.add_perpendicular_rubber_band(start_point, end_point)
+                        
+                        QgsMessageLog.logMessage("Profile extracted, scheduling visualization update...", "DualProfileViewer", Qgis.Info)
+                        
+                        # Update visualization with a small delay
+                        QTimer.singleShot(50, self.update_perpendicular_visualization)
+                        
+                        # Also update the main plot to show the vertical line immediately
+                        QTimer.singleShot(100, lambda: self.plot_with_matplotlib() if not self.use_web_action.isChecked() else None)
+                        
+                        # Enable create layer button
+                        self.layer_action.setEnabled(True)
+                        
+                        # Show success message
+                        self.iface.messageBar().pushMessage(
+                            "Success", 
+                            f"Perpendicular section created ({len(self.perpendicular_sections)} total). Click 'Create Layer' to add to map.",
+                            level=Qgis.Success,
+                            duration=5
+                        )
+                        
+                    except Exception as profile_error:
+                        QgsMessageLog.logMessage(f"Error extracting perpendicular profile: {str(profile_error)}", 
+                                               "DualProfileViewer", Qgis.Critical)
+                        return
+                    
+            QgsMessageLog.logMessage("Perpendicular section created successfully", "DualProfileViewer", Qgis.Info)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error creating perpendicular section: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+                
+    def update_perpendicular_visualization(self):
+        """Update visualization with perpendicular sections"""
+        try:
+            # Defer the update to avoid blocking the UI
+            QTimer.singleShot(100, self._do_perpendicular_update)
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error updating perpendicular visualization: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Critical)
+    
+    def _do_perpendicular_update(self):
+        """Perform the actual perpendicular update (called by timer)"""
+        try:
+            QgsMessageLog.logMessage("Performing deferred perpendicular update", "DualProfileViewer", Qgis.Info)
+            
+            # Add perpendicular sections to current plot
+            if self.use_web_action.isChecked() and PLOTLY_AVAILABLE:
+                # Update Plotly figure
+                # self.add_perpendicular_to_plotly()
+                QgsMessageLog.logMessage("Plotly perpendicular update skipped", "DualProfileViewer", Qgis.Info)
+            else:
+                # Update matplotlib
+                self.add_perpendicular_to_matplotlib()
+                
+            # Force update of the display
+            if hasattr(self, 'plot_stack'):
+                self.plot_stack.update()
+                
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in deferred perpendicular update: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            
+    def add_perpendicular_to_plotly(self):
+        """Add perpendicular sections to Plotly plot"""
+        if not self.perpendicular_sections or not self.web_view:
+            return
+            
+        # Generate JavaScript to add traces
+        js_traces = []
+        for i, perp in enumerate(self.perpendicular_sections):
+            if 'profile' in perp:
+                profile = perp['profile']
+                trace = {
+                    'x': profile['distances'],
+                    'y': profile['elevations'],
+                    'type': 'scatter',
+                    'mode': 'lines',
+                    'name': f'Perpendicular {i+1}',
+                    'line': {'color': f'rgb(0, {200-i*50}, 0)', 'width': 2, 'dash': 'dash'}
+                }
+                js_traces.append(str(trace).replace("'", '"'))
+                
+        js_code = f"""
+        if (window.Plotly) {{
+            var plot = document.getElementsByClassName('plotly')[0];
+            if (plot) {{
+                var traces = [{','.join(js_traces)}];
+                Plotly.addTraces(plot, traces);
+            }}
+        }}
+        """
+        
+        self.web_view.page().runJavaScript(js_code)
+        
+    def save_perpendicular_plot_image(self, index, figure):
+        """Save perpendicular plot image in background"""
+        try:
+            import tempfile
+            import os
+            # Create temporary file for the plot
+            temp_dir = tempfile.gettempdir()
+            plot_filename = os.path.join(temp_dir, f'perpendicular_profile_{index+1}.png')
+            figure.savefig(plot_filename, dpi=150, bbox_inches='tight')
+            
+            # Store the filename in the perpendicular section data
+            if index < len(self.perpendicular_sections):
+                self.perpendicular_sections[index]['plot_image'] = plot_filename
+                QgsMessageLog.logMessage(f"Saved perpendicular plot {index+1} to {plot_filename}", 
+                                       "DualProfileViewer", Qgis.Info)
+        except Exception as img_error:
+            QgsMessageLog.logMessage(f"Error saving perpendicular plot image: {str(img_error)}", 
+                                   "DualProfileViewer", Qgis.Warning)
+    
+    def add_perpendicular_to_matplotlib(self):
+        """Add perpendicular sections as separate tabs"""
+        if not self.perpendicular_sections:
+            QgsMessageLog.logMessage("No perpendicular sections to add", "DualProfileViewer", Qgis.Info)
+            return
+            
+        if not MATPLOTLIB_AVAILABLE:
+            QgsMessageLog.logMessage("Matplotlib not available", "DualProfileViewer", Qgis.Warning)
+            return
+            
+        try:
+            QgsMessageLog.logMessage("Creating perpendicular section tabs", "DualProfileViewer", Qgis.Info)
+            
+            # Create a tab widget if not exists
+            if not hasattr(self, 'plot_tabs'):
+                self.plot_tabs = QTabWidget()
+                # Replace the matplotlib widget with tab widget
+                self.plot_stack.removeWidget(self.matplotlib_widget)
+                self.plot_stack.addWidget(self.plot_tabs)
+                # Add main profile as first tab (with toolbar)
+                self.plot_tabs.addTab(self.matplotlib_widget, "Main Profile")
+                # Initialize perp_canvases list
+                self.perp_canvases = []
+            
+            # Check how many perpendicular tabs already exist
+            existing_perp_count = len(self.perp_canvases)
+            
+            # Add only new perpendicular sections as tabs
+            for i in range(existing_perp_count, len(self.perpendicular_sections)):
+                perp = self.perpendicular_sections[i]
+                if 'profile' in perp and isinstance(perp['profile'], dict):
+                    profile = perp['profile']
+                    if 'distances' in profile and 'elevations' in profile:
+                        QgsMessageLog.logMessage(f"Creating tab for perpendicular profile {i+1}", "DualProfileViewer", Qgis.Info)
+                        
+                        # Create new figure and canvas for this perpendicular section
+                        from matplotlib.figure import Figure
+                        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+                        from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+                        
+                        perp_figure = Figure(figsize=(8, 6))
+                        perp_canvas = FigureCanvas(perp_figure)
+                        
+                        # Create a widget to hold canvas and toolbar
+                        perp_widget = QWidget()
+                        perp_layout = QVBoxLayout(perp_widget)
+                        perp_layout.setContentsMargins(0, 0, 0, 0)
+                        
+                        # Add navigation toolbar
+                        perp_toolbar = NavigationToolbar(perp_canvas, perp_widget)
+                        perp_layout.addWidget(perp_toolbar)
+                        perp_layout.addWidget(perp_canvas)
+                        
+                        # Plot perpendicular profile
+                        ax = perp_figure.add_subplot(1, 1, 1)
+                        
+                        # Convert to numpy arrays
+                        distances = np.array(profile['distances'])
+                        elevations = np.array(profile['elevations'])
+                        
+                        # Plot the profile (without vertical line)
+                        ax.plot(distances, elevations, 'g-', linewidth=2, label=f'Perpendicular {i+1}')
+                        
+                        # Format the plot
+                        ax.set_xlabel('Distance (m)')
+                        ax.set_ylabel('Elevation (m)')
+                        ax.set_title(f'Perpendicular Section {i+1}')
+                        ax.grid(True, alpha=0.3)
+                        ax.legend()
+                        
+                        perp_figure.tight_layout()
+                        perp_canvas.draw_idle()
+                        
+                        # Add to tabs (add the widget containing toolbar and canvas)
+                        self.plot_tabs.addTab(perp_widget, f"Perpendicular {i+1}")
+                        
+                        # Store reference
+                        self.perp_canvases.append((perp_figure, perp_canvas))
+                        
+                        # Schedule image saving for later to avoid blocking
+                        QTimer.singleShot(200, lambda idx=i, fig=perp_figure: self.save_perpendicular_plot_image(idx, fig))
+            
+            # Switch to plot tabs view
+            self.plot_stack.setCurrentWidget(self.plot_tabs)
+            
+            QgsMessageLog.logMessage("Perpendicular tabs created successfully", "DualProfileViewer", Qgis.Info)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error in add_perpendicular_to_matplotlib: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Critical)
+            import traceback
+            QgsMessageLog.logMessage(traceback.format_exc(), "DualProfileViewer", Qgis.Critical)
+            
+    def update_3d_with_perpendicular(self):
+        """Update 3D viewer with perpendicular sections"""
+        # Check if 3D viewer is open
+        for viewer_type in ['pyvista', 'plotly']:
+            viewer_attr = f'{viewer_type}_viewer'
+            if hasattr(self, viewer_attr):
+                viewer = getattr(self, viewer_attr)
+                if viewer and hasattr(viewer, 'add_perpendicular_section'):
+                    for perp in self.perpendicular_sections:
+                        if 'profile' in perp:
+                            # Create geometry for 3D
+                            line_geom = QgsGeometry.fromPolylineXY([perp['start'], perp['end']])
+                            viewer.add_perpendicular_section(line_geom, perp['profile'])
+                            
+    def add_perpendicular_rubber_band(self, start_point, end_point):
+        """Add a rubber band to show perpendicular section on map"""
+        try:
+            # Create rubber band if we don't have one for perpendiculars
+            if not hasattr(self, 'perpendicular_rubber_bands'):
+                self.perpendicular_rubber_bands = []
+            
+            # Create new rubber band
+            rubber_band = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.LineGeometry)
+            rubber_band.setColor(QColor(0, 255, 0, 150))  # Green color
+            rubber_band.setWidth(2)
+            rubber_band.addPoint(start_point)
+            rubber_band.addPoint(end_point)
+            
+            self.perpendicular_rubber_bands.append(rubber_band)
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error adding perpendicular rubber band: {str(e)}", 
+                                   "DualProfileViewer", Qgis.Warning)
+    
+    def create_perpendicular_section_layers(self):
+        """Create layers for perpendicular sections - starts the async process"""
+        QgsMessageLog.logMessage("Starting async perpendicular layer creation", "DualProfileViewer", Qgis.Info)
+        
+        # Create and start the worker thread
+        self.perp_worker = PerpendicularLayerWorker(self.perpendicular_sections, self.iface)
+        self.perp_thread = QThread()
+        self.perp_worker.moveToThread(self.perp_thread)
+        
+        # Connect signals
+        self.perp_thread.started.connect(self.perp_worker.run)
+        self.perp_worker.finished.connect(self.perp_thread.quit)
+        self.perp_worker.finished.connect(self.perp_worker.deleteLater)
+        self.perp_thread.finished.connect(self.perp_thread.deleteLater)
+        self.perp_worker.progress.connect(self.on_perpendicular_progress)
+        self.perp_worker.message.connect(self.on_perpendicular_message)
+        self.perp_worker.error.connect(self.on_perpendicular_error)
+        
+        # Show progress dialog
+        self.perp_progress = QtWidgets.QProgressDialog(
+            "Preparing perpendicular section layers...",
+            "Cancel",
+            0,
+            100,
+            self
+        )
+        self.perp_progress.setWindowModality(Qt.WindowModal)
+        self.perp_progress.setMinimumDuration(0)
+        self.perp_progress.canceled.connect(self.cancel_perpendicular_creation)
+        self.perp_progress.show()
+        
+        # Start the thread
+        self.perp_thread.start()
+    
+    def on_perpendicular_progress(self, value, text):
+        """Update progress dialog"""
+        if hasattr(self, 'perp_progress') and self.perp_progress and not self.perp_progress.wasCanceled():
+            try:
+                self.perp_progress.setValue(value)
+                self.perp_progress.setLabelText(text)
+            except:
+                pass  # Dialog might have been closed
+    
+    def on_perpendicular_message(self, message, level, duration):
+        """Show message from worker"""
+        self.iface.messageBar().pushMessage("Success", message, level=level, duration=duration)
+        if hasattr(self, 'perp_progress') and self.perp_progress:
+            self.perp_progress.close()
+            self.perp_progress = None
+        
+        # The plot is already updated with perpendicular sections,
+        # no need to refresh again to avoid duplication
+    
+    def on_perpendicular_error(self, error_msg):
+        """Handle error from worker"""
+        if hasattr(self, 'perp_progress') and self.perp_progress:
+            self.perp_progress.close()
+            self.perp_progress = None
+        QtWidgets.QMessageBox.critical(self, "Error", f"Failed to create perpendicular layers: {error_msg}")
+    
+    def cancel_perpendicular_creation(self):
+        """Cancel the perpendicular creation process"""
+        if hasattr(self, 'perp_worker'):
+            self.perp_worker.cancel()
+        if hasattr(self, 'perp_thread') and self.perp_thread.isRunning():
+            self.perp_thread.quit()
+            self.perp_thread.wait()
+    
+    def clear_interactive_elements(self):
+        """Clear interactive marker and perpendicular sections"""
+        # Clean up marker using controller
+        if hasattr(self, 'marker_controller'):
+            self.marker_controller.cleanup()
+        
+        # Clear perpendicular rubber bands
+        if hasattr(self, 'perpendicular_rubber_bands'):
+            for rb in self.perpendicular_rubber_bands:
+                rb.reset()
+                self.iface.mapCanvas().scene().removeItem(rb)
+            self.perpendicular_rubber_bands.clear()
+        
+        # Clear perpendicular tabs if any
+        if hasattr(self, 'plot_tabs') and hasattr(self, 'perp_canvases'):
+            # Remove all tabs except the main one
+            while self.plot_tabs.count() > 1:
+                self.plot_tabs.removeTab(1)
+            
+            # Clear stored canvases
+            self.perp_canvases.clear()
+            
+            # If only one tab left, replace tabs with original canvas
+            if self.plot_tabs.count() == 1:
+                self.plot_stack.removeWidget(self.plot_tabs)
+                self.plot_stack.addWidget(self.matplotlib_widget)
+                self.plot_stack.setCurrentWidget(self.matplotlib_widget)
+                delattr(self, 'plot_tabs')
+        
+        self.perpendicular_sections.clear()
+        
+        # Note: Don't refresh plot here to avoid recursion

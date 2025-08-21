@@ -2,7 +2,7 @@
 name=Dual Profile Viewer
 qgisMinimumVersion=3.16
 description=Advanced elevation profile analysis with single/dual modes, multi-section polygons, 3D visualization, and AI reports
-version=2.0.0
+version=2.0.5
 author=Enzo Cocca
 email=enzo.ccc@gmail.com
 
@@ -17,7 +17,50 @@ icon=icon.png
 experimental=False
 deprecated=False
 
-changelog=2.0.0
+changelog=2.0.5
+    Bug Fixes:
+    - Fixed matplotlib widget not displaying when switching from web view
+    - Fixed UI blocking when creating perpendicular sections
+    - Moved plot image saving to background thread to prevent freezing
+    - Corrected widget references for matplotlib display with toolbar
+    
+    2.0.4
+    New Features:
+    - Added navigation toolbar with save button to all matplotlib plots
+    - Perpendicular section plots now saved automatically for layout export
+    - Improved marker visibility (stays visible when deactivated, shows in red)
+    
+    Bug Fixes:
+    - Fixed marker only activating once issue
+    - Fixed vertical dashed lines not appearing immediately on perpendicular creation
+    - Fixed perpendicular profile images not showing in layout
+    - Improved plot refresh mechanism to show updates immediately
+    
+    2.0.3
+    Bug Fixes:
+    - Fixed NameError with undefined axes_list variable
+    - Fixed duplicate plot creation when creating perpendicular layers
+    - Improved perpendicular line marker calculation accuracy
+    - Fixed duplicate profile section groups
+    - Enhanced logging for perpendicular section debugging
+    
+    2.0.2
+    Bug Fixes:
+    - Fixed UI blocking when creating perpendicular section layers
+    - Implemented async layer creation using separate worker thread
+    - Added progress dialog with cancel option for layer operations
+    - Improved UI responsiveness during heavy operations
+    
+    2.0.1
+    Bug Fixes:
+    - Fixed plugin freeze when creating perpendicular sections
+    - Improved event handling for interactive marker
+    - Added deferred updates to prevent UI blocking
+    - Enhanced error handling and logging for debugging
+    - Added visual indicators for perpendicular sections on map
+    - Fixed matplotlib canvas update blocking issues
+    
+    2.0.0
     Major Features:
     - Added single section mode for individual profiles
     - Implemented polygon multi-section functionality (one profile per polygon side)

@@ -685,6 +685,61 @@ class Advanced3DViewer(QDialog):
         
         QMessageBox.information(self, "Success", "Metadata exported to attribute table")
     
+    def add_perpendicular_section(self, line_geometry, profile_data):
+        """Add a perpendicular section to the 3D view"""
+        if not PYVISTA_AVAILABLE or not self.plotter:
+            return
+            
+        try:
+            # Extract points from line geometry
+            if line_geometry.type() == QgsWkbTypes.LineGeometry:
+                points = line_geometry.asPolyline()
+                
+                # Create 3D points for the section wall
+                wall_points = []
+                
+                # Create points along the profile
+                for i, (dist, elev) in enumerate(zip(profile_data['distances'], profile_data['elevations'])):
+                    # Interpolate position along line
+                    if len(points) >= 2:
+                        t = dist / profile_data['distances'][-1]
+                        x = points[0].x() + t * (points[1].x() - points[0].x())
+                        y = points[0].y() + t * (points[1].y() - points[0].y())
+                        
+                        # Add point at elevation
+                        wall_points.append([x, y, elev * self.vertical_exaggeration])
+                
+                if len(wall_points) > 1:
+                    # Create polyline for the perpendicular section
+                    wall_points_array = np.array(wall_points)
+                    poly = pv.PolyData(wall_points_array)
+                    poly["heights"] = wall_points_array[:, 2]
+                    
+                    # Create line
+                    lines = []
+                    for i in range(len(wall_points) - 1):
+                        lines.extend([2, i, i + 1])
+                    poly.lines = lines
+                    
+                    # Add to plotter with green color for perpendicular sections
+                    self.plotter.add_mesh(
+                        poly,
+                        color='green',
+                        line_width=3,
+                        label=f'Perpendicular Section'
+                    )
+                    
+                    # Store reference
+                    if not hasattr(self, 'perpendicular_meshes'):
+                        self.perpendicular_meshes = []
+                    self.perpendicular_meshes.append(poly)
+                    
+                    # Update view
+                    self.plotter.render()
+                    
+        except Exception as e:
+            print(f"Error adding perpendicular section: {str(e)}")
+    
     def show_installation_message(self):
         """Show message when PyVista is not installed"""
         layout = QVBoxLayout()

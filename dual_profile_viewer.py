@@ -102,7 +102,7 @@ class DualProfileViewer:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
-        icon_path2 = os.path.join(self.plugin_dir, 'image.png')
+        #icon_path2 = os.path.join(self.plugin_dir, 'image.png')
         
         # Add main viewer action
         self.add_action(
@@ -114,13 +114,13 @@ class DualProfileViewer:
             whats_this=self.tr('Archaeological dual profile analysis tool'))
         
         # Add 3D viewer action
-        self.add_action(
-            icon_path2,
-            text=self.tr('Advanced 3D Profile Viewer'),
-            callback=self.run_3d_viewer,
-            parent=self.iface.mainWindow(),
-            status_tip=self.tr('Advanced 3D visualization of profiles'),
-            whats_this=self.tr('View profiles in 3D with advanced features'))
+        # self.add_action(
+        #     icon_path2,
+        #     text=self.tr('Advanced 3D Profile Viewer'),
+        #     callback=self.run_3d_viewer,
+        #     parent=self.iface.mainWindow(),
+        #     status_tip=self.tr('Advanced 3D visualization of profiles'),
+        #     whats_this=self.tr('View profiles in 3D with advanced features'))
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""

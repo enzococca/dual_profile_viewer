@@ -6,12 +6,13 @@
 3. [Quick Start](#quick-start)
 4. [Interface Overview](#interface-overview)
 5. [Drawing Profiles](#drawing-profiles)
-6. [Visualization Features](#visualization-features)
-7. [Multi-DEM Analysis](#multi-dem-analysis)
-8. [Export and Output](#export-and-output)
-9. [Advanced Features](#advanced-features)
-10. [Troubleshooting](#troubleshooting)
-11. [Frequently Asked Questions](#frequently-asked-questions)
+6. [Perpendicular Sections](#perpendicular-sections)
+7. [Visualization Features](#visualization-features)
+8. [Multi-DEM Analysis](#multi-dem-analysis)
+9. [Export and Output](#export-and-output)
+10. [Advanced Features](#advanced-features)
+11. [Troubleshooting](#troubleshooting)
+12. [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Introduction
 
@@ -206,12 +207,90 @@ For comprehensive area analysis:
 - Offset updates dynamically
 - Elevation shown at cursor
 
+## Perpendicular Sections
+
+### Overview
+The perpendicular sections feature allows you to create cross-sectional profiles perpendicular to your main profile line. This is particularly useful for analyzing terrain variations across your main section.
+
+### Creating Perpendicular Sections
+
+#### Step-by-Step Process
+1. **Create Main Profile**:
+   - Draw your main section using any mode
+   - Generate the profile by clicking "Create"
+
+2. **Activate Interactive Marker**:
+   - Press the 'X' key on your keyboard
+   - The marker turns green when active
+   - A red marker indicates inactive state
+
+3. **Position the Marker**:
+   - Move your mouse along the section line
+   - The marker follows your cursor position
+   - A vertical line shows the current position on the graph
+
+4. **Create Perpendicular**:
+   - Right-click at desired position
+   - Enter the perpendicular length (in meters)
+   - Click OK to create the section
+
+5. **View Results**:
+   - A new tab appears with the perpendicular profile
+   - Green dashed lines on main profile show intersection points
+   - Each perpendicular is numbered sequentially
+
+### Features and Options
+
+#### Interactive Marker
+- **Visual Feedback**: Green when active, red when inactive
+- **Precise Positioning**: Follows mouse movement exactly
+- **Toggle Control**: Press X to activate/deactivate
+
+#### Perpendicular Properties
+- **Variable Length**: Set different lengths for each perpendicular
+- **Automatic Orientation**: Always 90° to main profile
+- **Multiple Sections**: Create unlimited perpendiculars
+
+#### Visualization
+- **Separate Tabs**: Each perpendicular in its own tab
+- **Navigation Toolbar**: Zoom, pan, and save options
+- **Intersection Markers**: Green dashed lines on main profile
+
+### Working with Perpendicular Data
+
+#### Creating Layers
+1. Click "Create Layer" button after creating perpendiculars
+2. A progress dialog shows layer creation status
+3. Perpendicular sections appear as green lines on map
+4. Layer named "Perpendicular_Sections" added to project
+
+#### Export Options
+- **Vector Export**: Includes all perpendicular sections
+- **Layout Generation**: Each perpendicular gets its own page
+- **Image Export**: Use toolbar save button for individual plots
+
+### Best Practices
+
+#### Planning Perpendiculars
+- Consider terrain features when positioning
+- Use consistent lengths for comparative analysis
+- Create perpendiculars at regular intervals for systematic sampling
+
+#### Performance Tips
+- Create all perpendiculars before generating layers
+- Use reasonable lengths (avoid extremely long sections)
+- Close unused tabs to free memory
+
 ## Visualization Features
 
 ### 2D Profile Plots
 
 #### Matplotlib View
 - **Static Plot**: High-quality rendering
+- **Navigation Toolbar**: Added for all plots
+  - Zoom and pan controls
+  - Home button to reset view
+  - Save button for direct image export
 - **Features**:
   - Grid toggle
   - Axis scaling

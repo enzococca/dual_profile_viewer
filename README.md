@@ -19,10 +19,11 @@ The **Dual Profile Viewer** is a comprehensive QGIS plugin for advanced elevatio
 - **Multi-DEM Comparison**: Compare profiles across multiple elevation models
 
 ### Advanced Visualization
-- **2D Interactive Plots**: Matplotlib and Plotly integration
+- **2D Interactive Plots**: Matplotlib and Plotly integration with navigation toolbar
 - **3D Terrain Viewer**: PyVista-based advanced 3D visualization
 - **Web 3D Viewer**: Plotly-based browser visualization
 - **Real-time Preview**: See profiles while drawing
+- **Perpendicular Sections**: Interactive marker for creating perpendicular profiles
 
 ### Professional Output
 - **Layout Generation**: Automated PDF/image layouts
@@ -136,7 +137,8 @@ pip install requests
 **Matplotlib (Static)**
 - Traditional elevation plot
 - Print-ready quality
-- Basic interaction
+- Navigation toolbar with zoom, pan, save
+- Export plots directly as images
 
 **Plotly (Interactive)**
 - Zoom, pan, hover details
@@ -170,7 +172,24 @@ pip install requests
 4. **Compare**: Profiles extracted from all DEMs
 5. **Visualize**: Side-by-side comparison
 
-### 6. Data Export
+### 6. Perpendicular Sections
+
+#### Creating Perpendicular Profiles
+1. **Draw Main Section**: Create your main profile first
+2. **Activate Marker**: Press 'X' key to activate green marker
+3. **Position Marker**: Move mouse along section line
+4. **Create Perpendicular**: Right-click to create perpendicular section
+5. **Set Length**: Enter perpendicular section length (meters)
+6. **View Results**: New tab appears with perpendicular profile
+
+#### Features
+- **Interactive Marker**: Green when active, red when inactive
+- **Multiple Perpendiculars**: Create as many as needed
+- **Separate Tabs**: Each perpendicular gets its own tab
+- **Vertical Lines**: Dashed lines show intersection points
+- **Export Ready**: All perpendiculars included in layouts
+
+### 7. Data Export
 
 #### Vector Export Options
 
@@ -199,7 +218,7 @@ pip install requests
 4. Select output file
 5. Optionally add to map
 
-### 7. Layout Generation
+### 8. Layout Generation
 
 #### Single Section Layout
 - One page document
@@ -217,6 +236,7 @@ pip install requests
   - Individual profile
   - Section statistics
   - Consistent formatting
+- Perpendicular sections included automatically
 - Optional AI report as final page
 
 #### Creating Layouts
@@ -228,7 +248,7 @@ pip install requests
 3. Generate layout
 4. Export to PDF/Image
 
-### 8. Statistics and Analysis
+### 9. Statistics and Analysis
 
 #### Available Metrics
 - **Elevation**: Min, Max, Mean, Range
@@ -242,7 +262,7 @@ pip install requests
 3. Copy to clipboard
 4. Export to file
 
-### 9. AI Report Generation
+### 10. AI Report Generation
 
 #### Setup (First Time)
 1. Click `AI Report` button
@@ -380,7 +400,7 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE) file
 
 ---
 
-**Version**: 2.0.0  
-**Last Updated**: December 2024  
+**Version**: 2.0.5  
+**Last Updated**: August 2025  
 **QGIS Minimum Version**: 3.16  
 **Python**: 3.7+
